@@ -1,0 +1,143 @@
+{
+  "theme": "light_primary_with_dark_dashboard",
+  "typography": {
+    "strategy": "The 'Old Money Tech' variant adapted for Modern EdTech. Trust, clarity, and authority.",
+    "headings": {
+      "font_family": "Cabinet Grotesk, sans-serif",
+      "weights": ["400", "800"],
+      "usage": "Use Black (800) for hero and H2s, Regular (400) for elegant subheadings. Tracking tight.",
+      "scales": {
+        "h1": "text-5xl sm:text-6xl tracking-tight leading-none",
+        "h2": "text-3xl sm:text-4xl tracking-tight",
+        "h3": "text-xl sm:text-2xl tracking-tight"
+      }
+    },
+    "body": {
+      "font_family": "Manrope, sans-serif",
+      "weights": ["400", "500", "600"],
+      "usage": "Clean, highly legible geometric body.",
+      "scales": {
+        "base": "text-base leading-relaxed",
+        "small": "text-sm",
+        "labels": "text-xs uppercase tracking-[0.2em] font-bold"
+      }
+    }
+  },
+  "colors": {
+    "archetype": "ARCHETYPE 4 (SWISS/STRUCTURAL) + ARCHETYPE 1 (ORGANIC)",
+    "palette": {
+      "background": "#FAFAFA",
+      "surface": "#FFFFFF",
+      "primary": "#E06A4E",
+      "primary_hover": "#C95A3E",
+      "text_main": "#0F172A",
+      "text_muted": "#64748B",
+      "border": "#E2E8F0",
+      "success": "#8BA888",
+      "warning": "#F59E0B"
+    },
+    "dark_mode_palette": {
+      "background": "#0F172A",
+      "surface": "#1E293B",
+      "primary": "#E06A4E",
+      "text_main": "#F8FAFC",
+      "border": "#334155"
+    },
+    "rules": [
+      "No generic full-screen gradients. Use solid colors or very subtle noise textures.",
+      "Primary color (Terracotta) is ONLY for primary CTAs and active states.",
+      "Borders are 1px solid, never soft muddy shadows.",
+      "Never use pure transparent backgrounds for components with text over images."
+    ]
+  },
+  "visual_enhancers": {
+    "surfaces": "Use Flat Solid with 1px border for dashboard cards. Use Crystal Glassmorphism (backdrop-blur-xl bg-white/70 border border-white/20) for sticky headers.",
+    "textures": "Subtle SVG noise overlay on the hero section background to reduce digital flatness.",
+    "borders": "Expose the skeleton in dashboard views. Use border-collapse style grids for data-heavy sections."
+  },
+  "components": {
+    "button": "Pill-shaped (rounded-full) for marketing, rounded-lg for dashboards. Active transition: hover:-translate-y-1 hover:shadow-lg.",
+    "card": "Flat, 1px border-border, rounded-2xl for marketing, rounded-xl for dashboards. No default shadow, add shadow-sm on hover.",
+    "inputs": "Shadcn defaults but customize to rounded-lg, 1px border, focus:ring-2 focus:ring-primary/20 focus:border-primary.",
+    "badges": "Soft background (bg-primary/10) with solid text (text-primary) for subjects/categories.",
+    "data_display": "Tables over charts for marketplace operations (tutor lists, booking history)."
+  },
+  "grids_and_layouts": {
+    "marketing": {
+      "hero": "Split layout or asymmetrical text. Max width 7xl.",
+      "features": "Bento Grid (Tetris Mode): grid-cols-1 md:grid-cols-12 gap-8. Mix col-span-8 and col-span-4.",
+      "spacing": "Generous: py-24 or py-32 for sections."
+    },
+    "dashboard": {
+      "layout": "Collapsible left sidebar (w-64) + Main content area.",
+      "grid": "High Density Mode: grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6.",
+      "spacing": "Dense: p-6 or p-8 inside cards."
+    }
+  },
+  "motion": {
+    "rules": [
+      "Hover states for all interactive elements (buttons, cards, links).",
+      "Staggered entrance animations for tutor lists and dashboard widgets using framer-motion.",
+      "NEVER use `transition: all`. Use specific transitions: `transition-transform duration-200 ease-out`."
+    ]
+  },
+  "accessibility": {
+    "rules": [
+      "Text contrast must meet APCA / WCAG AA. Terracotta on white is good, white on Terracotta is good.",
+      "Focus rings MUST be visible (focus:ring-2 focus:ring-primary focus:outline-none).",
+      "Include data-testid on all interactive elements (e.g., data-testid='book-tutor-button')."
+    ]
+  },
+  "media_and_icons": {
+    "icons": "Use `lucide-react` for standard UI. Use `@phosphor-icons/react` (Duotone) for marketing features.",
+    "images": "Use strict max-heights on mobile (max-h-[60vh]). Overlays should be max bg-black/40."
+  },
+  "3d_libraries": {
+    "usage": "Use Framer Motion for 2D stagger animations on marketplace cards. No heavy 3D rendering required for this EdTech platform to maintain fast loading times."
+  },
+  "image_urls": {
+    "hero_tutor_online": {
+      "url": "https://images.unsplash.com/photo-1616587226960-4a03badbe8bf",
+      "description": "Tutor teaching online via video call. Use in Hero section or How It Works."
+    },
+    "student_learning": {
+      "url": "https://images.unsplash.com/photo-1513258496099-48168024aec0",
+      "description": "Student wearing headphones focused on laptop. Use for Student Persona/Benefits."
+    },
+    "tutor_portrait_1": {
+      "url": "https://images.pexels.com/photos/8423069/pexels-photo-8423069.jpeg",
+      "description": "Smiling female teacher. Use for Featured Tutors or Tutor Profile."
+    },
+    "tutor_portrait_2": {
+      "url": "https://images.pexels.com/photos/8423388/pexels-photo-8423388.jpeg",
+      "description": "Confident female teacher. Use for Featured Tutors or Tutor Profile."
+    }
+  },
+  "instructions_to_main_agent": [
+    "Build the landing page first using custom HTML/Tailwind with Framer Motion. Do not rely heavily on Shadcn for the marketing page structure.",
+    "For the Dashboard and Booking flows, use Shadcn heavily (Tables, Dialogs, Select, Calendar, Forms).",
+    "Ensure `data-testid` is on every button and form input.",
+    "Implement the Layout with a Left Sidebar for Dashboards and a Sticky Glass Header for the Landing page.",
+    "Use react-icons or lucide-react for trust logos (e.g., University/Company logos) instead of placeholder text."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "You tend to converge toward generic, 'on distribution' outputs. Avoid this: make creative, distinctive frontends that surprise and delight.",
+    "Don't make generic centered layouts, simplistic gradients, and uniform styling.",
+    "Create depth through layered design elements with z-index hierarchy and 1px borders.",
+    "Use glass-morphism effects with backdrop filters (12-24px blur, bg-white/70, 1px border-white/20).",
+    "You MUST NOT apply universal transition. Eg: `transition: all`. Always add transitions for specific interactive elements.",
+    "You MUST NOT center align the app container, ie do not add `.App { text-align: center; }` in the css file.",
+    "Always use modern button styles like pill-shaped, or sharp button with interaction animations & color relevant to the app style.",
+    "NEVER use AI assistant Emoji characters like 🤖🧠💭💡🔮🎯 etc for icons.",
+    "Every interaction needs micro-animations - hover states, transitions, parallax effects, and entrance animations.",
+    "Use 2-3x more spacing than feels comfortable. Cramped designs look cheap.",
+    "Use `sonner` for toasts."
+  ],
+  "GENERAL_UI_UX_DESIGN_GUIDELINES": [
+    "Focus on trust, clarity and conversion for EdTech platforms.",
+    "All interactive and key informational elements MUST include a `data-testid` attribute to facilitate robust automated testing.",
+    "Do not use complete transparent background in header, overlays, or any surface that has content under it. Example: Dropdown with transparent background is strictly forbidden.",
+    "Ensure clear progressive disclosure in dashboards—don't crowd the first screen.",
+    "Ensure form accessibility by using explicit labels and high-contrast focus states."
+  ]
+}

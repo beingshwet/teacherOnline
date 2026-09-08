@@ -1,0 +1,115 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap');
+@import url('https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@800,700,400&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 0 0% 98%;
+  --foreground: 222 47% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 11%;
+  --primary: 12 72% 59%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 210 40% 96%;
+  --secondary-foreground: 222 47% 11%;
+  --muted: 210 40% 96%;
+  --muted-foreground: 215 16% 47%;
+  --accent: 12 72% 96%;
+  --accent-foreground: 12 72% 30%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 214 32% 91%;
+  --input: 214 32% 91%;
+  --ring: 12 72% 59%;
+  --radius: 0.75rem;
+}
+
+* { border-color: hsl(var(--border)); }
+
+html, body, #root {
+  min-height: 100%;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.font-display { font-family: 'Cabinet Grotesk', 'Manrope', sans-serif; letter-spacing: -0.02em; }
+
+.eyebrow {
+  font-size: 0.75rem; letter-spacing: 0.2em; text-transform: uppercase; font-weight: 700;
+}
+
+.noise-bg {
+  background-image:
+    radial-gradient(1200px 500px at 10% -10%, rgba(224,106,78,0.10), transparent 60%),
+    radial-gradient(900px 400px at 90% 10%, rgba(139,168,136,0.10), transparent 60%);
+}
+
+.btn-primary {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+  background: hsl(var(--primary)); color: white; font-weight: 600;
+  padding: 0.75rem 1.5rem; border-radius: 9999px;
+  transition: transform 200ms ease-out, box-shadow 200ms ease-out, background-color 200ms;
+}
+.btn-primary:hover { background: hsl(12 72% 52%); transform: translateY(-2px); box-shadow: 0 12px 24px -12px rgba(224,106,78,0.5); }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+.btn-outline {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+  background: white; color: hsl(var(--foreground)); font-weight: 600;
+  padding: 0.75rem 1.5rem; border-radius: 9999px; border: 1px solid hsl(var(--border));
+  transition: transform 200ms ease-out, background-color 200ms;
+}
+.btn-outline:hover { background: hsl(var(--secondary)); transform: translateY(-2px); }
+
+.btn-ghost {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem;
+  padding: 0.5rem 0.9rem; border-radius: 0.5rem; font-weight: 500; color: hsl(var(--foreground));
+  transition: background-color 150ms;
+}
+.btn-ghost:hover { background: hsl(var(--secondary)); }
+
+.chip {
+  display: inline-flex; align-items: center; padding: 0.25rem 0.65rem; border-radius: 9999px;
+  background: hsl(var(--accent)); color: hsl(var(--accent-foreground));
+  font-size: 0.75rem; font-weight: 600;
+}
+
+.card-flat {
+  background: hsl(var(--card)); border: 1px solid hsl(var(--border));
+  border-radius: 1rem; transition: box-shadow 200ms ease-out, transform 200ms ease-out;
+}
+.card-flat:hover { box-shadow: 0 10px 30px -20px rgba(15,23,42,0.15); }
+
+.field {
+  display: block; width: 100%; padding: 0.65rem 0.9rem;
+  border-radius: 0.6rem; border: 1px solid hsl(var(--border));
+  background: white; font-size: 0.95rem;
+  transition: border-color 150ms, box-shadow 150ms;
+}
+.field:focus { outline: none; border-color: hsl(var(--primary)); box-shadow: 0 0 0 3px hsl(12 72% 59% / 0.15); }
+
+.label { font-size: 0.8rem; font-weight: 600; color: hsl(var(--muted-foreground)); margin-bottom: 0.35rem; display: block; }
+
+.stat-num { font-family: 'Cabinet Grotesk', sans-serif; font-weight: 800; letter-spacing: -0.03em; font-size: 2rem; line-height: 1; }
+
+.sidebar-link {
+  display: flex; align-items: center; gap: 0.6rem; padding: 0.6rem 0.85rem;
+  border-radius: 0.5rem; color: hsl(var(--muted-foreground));
+  font-weight: 500; transition: color 150ms, background-color 150ms;
+}
+.sidebar-link:hover { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
+.sidebar-link.active { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); }
+
+.glass-header {
+  backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+  background: rgba(255,255,255,0.75); border-bottom: 1px solid hsl(var(--border));
+}
+
+@keyframes fadeUp { from { opacity: 0; transform: translateY(8px);} to { opacity: 1; transform: translateY(0);} }
+.fade-up { animation: fadeUp 400ms ease-out both; }

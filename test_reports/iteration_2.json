@@ -1,0 +1,34 @@
+{
+  "summary": "Iteration 2 regression — all 3 previously failed regression bugs are FIXED and verified. 12/12 backend pytest cases pass covering auth, tutor listing (only APPROVED), pending→approve flow, /tutors/me/availability (5 seeded slots), double-booking prevention (409 SLOT_UNAVAILABLE), cross-student 403 authorization, student→admin 403 guard, meet-url update, complete booking, review endpoint 200 with clean JSON (no _id leak), student dashboard bookings list. Frontend smoke covered: landing → tutors (7 cards, includes newly approved test tutor) → tutor profile → 7-day picker → slots visible → student dashboard shows Recent sessions (previously empty, now populated → CORS/cookie fix confirmed) → tutor availability page shows 5 seeded slot editors (avail-row-0..4) → tutor booking detail shows COMPLETED + saved Meet URL 'https://meet.google.com/abc-defg-hij' + 'Your review: 5' rendering → admin dashboard shows 9 stat cards → /admin/{tutors,students,bookings} all render rows.",
+  "regression_status": {
+    "review_endpoint_500": "FIXED — POST /api/bookings/{id}/review returns 200 with rating field and no _id leak (also 400 on duplicate). Verified via pytest.",
+    "tutors_me_availability_empty": "FIXED — GET /api/tutors/me/availability returns 5 slots for demo tutor (Mon-Thu + Sat).",
+    "student_dashboard_empty": "FIXED — CORS specific origins + credentials cookies work. Dashboard now lists Recent sessions (3 COMPLETED bookings) after login."
+  },
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Student dashboard", "issues": ["Upcoming sessions block reads 'No upcoming sessions' when all bookings are COMPLETED — this is correct behavior, but the 'My sessions' summary card and header always show '0 upcoming' which is accurate given data state. No bug — informational only."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_tutorhive.py",
+    "/app/test_reports/pytest/iter2.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is 870 lines and is starting to grow — consider splitting into routers (auth, tutors, bookings, admin) for maintainability but not urgent for MVP.",
+    "GET /api/tutors public listing does not include tutor email (only first_name/last_name), which is correct for privacy. Admin listing exposes only names too and uses 'id' as user_id — consider renaming to 'user_id' for clarity.",
+    "Booking dashboard/upcoming aggregation uses status filter — confirmed working. No changes needed."
+  ],
+  "updated_files": ["/app/backend/tests/test_tutorhive.py"],
+  "success_rate": {"backend": "100% (12/12)", "frontend": "~95% (all key flows verified via UI + backend cross-check)"},
+  "test_credentials": "student@example.com/Student@12345, tutor@example.com/Tutor@12345, admin@example.com/Admin@12345 — all working.",
+  "seed_data_creation": "Created 1 new tutor via /api/auth/register in the approve-flow test and approved it; also created a secondary student for the cross-student 403 test. Left in DB (harmless — new tutor now approved and appears in listing).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend regression suite is at /app/backend/tests/test_tutorhive.py (run with `python -m pytest backend/tests/test_tutorhive.py -o addopts='' -v`). All 12 tests pass. All three iteration-1 regression bugs are fixed. If new features are added, extend this file. Note: the pytest.ini uses xdist LoadScope by default; my tests share state via `pytest.booking_id` so run with `-o addopts=''` to disable xdist. Demo tutor id can be discovered by scanning public /api/tutors for first_name='Demo'. Booking created during test remains COMPLETED with a review — future review tests should create a fresh booking to avoid the 400 duplicate-review guard.",
+  "rca of the issue": "N/A — no bugs found in this iteration."
+}

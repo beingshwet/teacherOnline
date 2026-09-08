@@ -1,0 +1,55 @@
+{
+  "summary": "First-finish smoke test on TutorHive: verified backend auth + tutor search + booking + double-booking prevention + admin + notifications + role guards, plus UI smoke test for landing, tutor search, and student login. Core P0 flows work; found one HIGH backend bug in review endpoint (500 due to ObjectId serialization) and one MEDIUM UI/data bug on student dashboard.",
+  "tested_scope": ["backend", "frontend", "auth", "integration"],
+  "passed": [
+    "GET /api/tutors returns 6 APPROVED tutors (200)",
+    "GET /api/tutors?subject=Mathematics filters to 2 tutors",
+    "GET /api/auth/me unauth returns 401",
+    "POST /api/auth/login for student/tutor/admin all 200 with correct roles",
+    "POST /api/bookings creates booking (200) with CONFIRMED status, price/fees computed",
+    "Double-booking prevention: second POST to same tutor_id+start_time returns 409 SLOT_UNAVAILABLE (both same-user and cross-user)",
+    "GET /api/tutors/{id}/slots?date=... correctly marks booked=true for taken slots",
+    "PUT /api/bookings/{id}/meet-url (tutor) 200, GET returns saved meet_url",
+    "POST /api/bookings/{id}/complete (tutor) 200",
+    "GET /api/admin/dashboard (admin) returns stats; (student) returns 403",
+    "GET /api/notifications (student) returns BOOKING_CONFIRMED with unread=1",
+    "Landing page renders hero + CTA + navigation",
+    "/tutors public search renders 6 tutor cards",
+    "Student login redirects to /student/dashboard with correct testids"
+  ],
+  "failed": [
+    {
+      "area": "backend/reviews",
+      "issue": "POST /api/bookings/{id}/review returns HTTP 500. Review IS persisted (retry returns 400 'Review already submitted' and review appears in GET /api/tutors/{id}.reviews list), but response serialization crashes with: ValueError: [TypeError(\"'ObjectId' object is not iterable\"), TypeError('vars() argument must have __dict__ attribute')]. Client sees 500 for a successful action.",
+      "evidence": "curl POST /api/bookings/543d9e06-.../review -> HTTP 500 'Internal Server Error'. Backend log stack trace from fastapi.encoders.jsonable_encoder. Retry POST -> 400 'Review already submitted'. GET /api/tutors/548c0252-.../reviews list length=1.",
+      "priority": "HIGH"
+    },
+    {
+      "area": "backend/tutor-profile-response",
+      "issue": "GET /api/tutors/{id} returns rating_avg=null and total_reviews=null (not aggregated/updated after review). Reviews list is populated but summary fields are missing/None. Frontend TutorProfile relies on these.",
+      "evidence": "curl GET /api/tutors/548c0252-... -> rating: None, reviews: None, reviews_list length: 1",
+      "priority": "MEDIUM"
+    },
+    {
+      "area": "frontend/student-dashboard",
+      "issue": "Student dashboard shows '0 upcoming' and 'No upcoming sessions' / 'No past sessions yet.' even though the authenticated student has 2 bookings (1 CONFIRMED, 1 COMPLETED). Possible mismatch between dashboard aggregation query and bookings list.",
+      "evidence": "Screenshot of /student/dashboard after login; GET /api/bookings returns bookings but dashboard counters/lists show empty.",
+      "priority": "MEDIUM"
+    },
+    {
+      "area": "backend/tutor-availability",
+      "issue": "GET /api/tutors/me/availability for demo tutor returns {\"slots\": []} despite slots endpoint deriving 4 valid slots per day (Mon-Thu 17-21 UTC). Availability document appears not seeded in the shape the me/availability endpoint expects, OR the endpoint reads a different key. Not blocking booking (slots endpoint works), but tutor cannot edit availability from UI without initial data.",
+      "evidence": "curl -b tutor.cookies GET /api/tutors/me/availability -> {\"slots\": []}, but GET /api/tutors/{demo}/slots?date=2026-09-14 -> 4 slots.",
+      "priority": "MEDIUM"
+    }
+  ],
+  "action_items": [
+    "Fix review endpoint 500: exclude Mongo _id from response or return a plain dict/Pydantic model (likely returning the raw insert result including ObjectId in POST /api/bookings/{id}/review).",
+    "After review submission, aggregate rating_avg/total_reviews on tutor profile and include them in GET /api/tutors/{id}.",
+    "Investigate student dashboard aggregation: ensure it queries the same collection with matching student_id and shows CONFIRMED as upcoming.",
+    "Seed demo tutor availability slots (or ensure GET /api/tutors/me/availability derives from same source as /slots) so tutor UI shows current weekly availability."
+  ],
+  "success_rate": {"backend": "~85%", "frontend": "~90%"},
+  "retest_needed": true,
+  "full_testing_deferred": true
+}
