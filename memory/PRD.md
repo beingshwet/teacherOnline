@@ -43,11 +43,12 @@ Build a 1-to-1 online tutoring platform (Phase 1, web-only) that connects studen
 ## Prioritized Backlog
 
 ### P1 (next up)
+- [x] **Session reminder scheduler (24h / 1h / 10m) with mock email provider + in-app notifications** (Jan 2026)
+- [x] Admin email log viewer (/admin/emails) with manual "run now" trigger
+- Swap MockEmailProvider for SendGrid or Resend (drop-in — implement EmailProvider.send)
 - Messaging (student ↔ tutor) via WebSocket
 - Cancellation/refund workflow (with cutoff windows)
 - Stripe payment integration (playbook-based)
-- Email notifications (SendGrid/Resend) for booking + reminder
-- Automated session reminders (24h / 1h / 10m before)
 - Tutor profile picture upload to S3
 
 ### P2

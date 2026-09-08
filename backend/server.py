@@ -6,6 +6,7 @@ load_dotenv(ROOT_DIR / '.env')
 import os
 import uuid
 import logging
+import asyncio
 import bcrypt
 import jwt
 from datetime import datetime, timezone, timedelta, time as dtime, date as ddate
@@ -701,6 +702,125 @@ async def tutor_earnings(user: dict = Depends(require_roles("tutor"))):
     }
 
 # ============================================================
+# Email reminders (mock provider) + scheduler
+# ============================================================
+REMINDER_CHECKPOINTS = [
+    {"key": "24h", "minutes_before": 24 * 60, "label": "24 hours"},
+    {"key": "1h",  "minutes_before": 60,      "label": "1 hour"},
+    {"key": "10m", "minutes_before": 10,      "label": "10 minutes"},
+]
+
+class EmailProvider:
+    """Abstraction so a real provider (SendGrid/Resend) can replace this later."""
+    async def send(self, to_email: str, to_name: str, subject: str, body: str, meta: dict):
+        raise NotImplementedError
+
+class MockEmailProvider(EmailProvider):
+    async def send(self, to_email, to_name, subject, body, meta):
+        log.info("[EMAIL:MOCK] to=%s <%s> | subject=%s | booking=%s checkpoint=%s",
+                 to_name, to_email, subject, meta.get("booking_id"), meta.get("checkpoint"))
+        log.info("[EMAIL:MOCK BODY]\n%s\n---", body)
+        await db.email_log.insert_one({
+            "id": str(uuid.uuid4()),
+            "to_email": to_email, "to_name": to_name,
+            "subject": subject, "body": body, "meta": meta,
+            "provider": "mock",
+            "sent_at": iso(now_utc()),
+        })
+
+email_provider: EmailProvider = MockEmailProvider()
+
+def _render_reminder(booking: dict, recipient: dict, other: dict, checkpoint_label: str) -> tuple:
+    start = parse_iso(booking["start_time"])
+    when_pretty = start.strftime("%A, %b %d at %H:%M UTC")
+    role_line = "your student" if recipient.get("role") == "tutor" else "your tutor"
+    subject = f"Your {booking['subject']} session starts in {checkpoint_label}"
+    join_line = booking.get("meet_url") or "The Google Meet link will appear on your session page."
+    body = (
+        f"Hi {recipient.get('first_name','')},\n\n"
+        f"This is a friendly reminder that your {booking['subject']} session with "
+        f"{role_line} {other.get('first_name','')} {other.get('last_name','')} starts in "
+        f"{checkpoint_label}.\n\n"
+        f"When: {when_pretty}\n"
+        f"Duration: {booking['duration_minutes']} minutes\n"
+        f"Join Class: {join_line}\n\n"
+        f"See you there!\n"
+        f"— TutorHive"
+    )
+    return subject, body
+
+async def _fire_reminder(booking: dict, checkpoint_key: str, checkpoint_label: str):
+    student = await db.users.find_one({"id": booking["student_id"]}, {"_id": 0}) or {}
+    tutor = await db.users.find_one({"id": booking["tutor_id"]}, {"_id": 0}) or {}
+    # Email both parties
+    for recipient, other in [(student, tutor), (tutor, student)]:
+        if not recipient.get("email"):
+            continue
+        subject, body = _render_reminder(booking, recipient, other, checkpoint_label)
+        await email_provider.send(
+            to_email=recipient["email"],
+            to_name=f"{recipient.get('first_name','')} {recipient.get('last_name','')}".strip(),
+            subject=subject,
+            body=body,
+            meta={"booking_id": booking["id"], "checkpoint": checkpoint_key, "role": recipient.get("role")},
+        )
+    # In-app notification for both
+    await notify(booking["student_id"], f"SESSION_REMINDER_{checkpoint_key.upper()}",
+                 f"Session starts in {checkpoint_label}",
+                 f"Your {booking['subject']} session with {tutor.get('first_name','')} starts in {checkpoint_label}.")
+    await notify(booking["tutor_id"], f"SESSION_REMINDER_{checkpoint_key.upper()}",
+                 f"Session starts in {checkpoint_label}",
+                 f"Your {booking['subject']} session with {student.get('first_name','')} starts in {checkpoint_label}.")
+
+async def _run_reminder_cycle():
+    """Scan upcoming CONFIRMED bookings and fire any due reminders (idempotent via reminders_sent)."""
+    now = now_utc()
+    horizon = now + timedelta(minutes=REMINDER_CHECKPOINTS[0]["minutes_before"] + 30)
+    cursor = db.bookings.find({
+        "status": "CONFIRMED",
+        "start_time": {"$gte": iso(now), "$lte": iso(horizon)},
+    }, {"_id": 0})
+    async for b in cursor:
+        start = parse_iso(b["start_time"])
+        minutes_until = (start - now).total_seconds() / 60.0
+        sent = b.get("reminders_sent") or {}
+        for cp in REMINDER_CHECKPOINTS:
+            if sent.get(cp["key"]):
+                continue
+            # Fire when we're within the checkpoint window (catch-up if scheduler was down)
+            if minutes_until <= cp["minutes_before"]:
+                try:
+                    await _fire_reminder(b, cp["key"], cp["label"])
+                    await db.bookings.update_one(
+                        {"id": b["id"]},
+                        {"$set": {f"reminders_sent.{cp['key']}": iso(now_utc())}},
+                    )
+                    log.info("Reminder %s fired for booking %s", cp["key"], b["id"])
+                except Exception as e:
+                    log.exception("Reminder %s failed for booking %s: %s", cp["key"], b["id"], e)
+
+async def reminder_scheduler_loop():
+    log.info("Reminder scheduler started (interval=60s)")
+    while True:
+        try:
+            await _run_reminder_cycle()
+        except Exception as e:
+            log.exception("Reminder cycle error: %s", e)
+        await asyncio.sleep(60)
+
+# Admin: view email log
+@api.get("/admin/email-log")
+async def admin_email_log(_: dict = Depends(require_roles("admin", "super_admin")), limit: int = 100):
+    items = await db.email_log.find({}, {"_id": 0}).sort("sent_at", -1).limit(limit).to_list(limit)
+    return {"emails": items}
+
+# Admin: manually trigger a reminder cycle (useful for demos/testing)
+@api.post("/admin/reminders/run")
+async def admin_run_reminders(_: dict = Depends(require_roles("admin", "super_admin"))):
+    await _run_reminder_cycle()
+    return {"ok": True, "ran_at": iso(now_utc())}
+
+# ============================================================
 # CORS + startup
 # ============================================================
 app.include_router(api)
@@ -727,7 +847,10 @@ async def startup():
     )
     await db.reviews.create_index([("booking_id", ASCENDING)], unique=True)
     await db.notifications.create_index([("user_id", ASCENDING), ("created_at", -1)])
+    await db.email_log.create_index([("sent_at", -1)])
     await seed()
+    # Launch background reminder scheduler (no external cron needed)
+    asyncio.create_task(reminder_scheduler_loop())
 
 @app.on_event("shutdown")
 async def shutdown():

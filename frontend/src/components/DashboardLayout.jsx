@@ -24,6 +24,7 @@ const linksByRole = {
     { to: "/admin/tutors", label: "Tutors", icon: ShieldCheck, testid: "sb-admin-tutors" },
     { to: "/admin/students", label: "Students", icon: Users, testid: "sb-admin-students" },
     { to: "/admin/bookings", label: "Bookings", icon: CalendarClock, testid: "sb-admin-bookings" },
+    { to: "/admin/emails", label: "Email log", icon: Bell, testid: "sb-admin-emails" },
   ],
 };
 

@@ -11,6 +11,7 @@ import StudentDashboard from "@/pages/StudentDashboard";
 import { BookingsList, BookingDetail } from "@/pages/Bookings";
 import { TutorDashboard, TutorProfileEdit, TutorAvailability, TutorEarnings } from "@/pages/TutorPages";
 import { AdminDashboard, AdminTutors, AdminStudents, AdminBookings } from "@/pages/AdminPages";
+import AdminEmailLog from "@/pages/AdminEmailLog";
 import Notifications from "@/pages/Notifications";
 
 function Protected({ children, roles }) {
@@ -55,6 +56,7 @@ function App() {
           <Route path="/admin/tutors" element={<Protected roles={["admin", "super_admin"]}><AdminTutors /></Protected>} />
           <Route path="/admin/students" element={<Protected roles={["admin", "super_admin"]}><AdminStudents /></Protected>} />
           <Route path="/admin/bookings" element={<Protected roles={["admin", "super_admin"]}><AdminBookings /></Protected>} />
+          <Route path="/admin/emails" element={<Protected roles={["admin", "super_admin"]}><AdminEmailLog /></Protected>} />
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
