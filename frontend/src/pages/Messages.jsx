@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { api, formatError, BACKEND_URL, API } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
-import { Send, MessageSquare, Paperclip, FileText, Image as ImageIcon, X, Download } from "lucide-react";
+import { Send, MessageSquare, Paperclip, FileText, Image as ImageIcon, X, Download, Trash2, Check, CheckCheck } from "lucide-react";
 import { toast } from "sonner";
 
 function fmtTime(iso) {
@@ -53,15 +53,32 @@ export default function Messages() {
     ws.onmessage = (ev) => {
       try {
         const msg = JSON.parse(ev.data);
-        if (msg.type !== "message") return;
-        const m = msg.message;
-        // If message belongs to the currently open thread, append
-        if (active && (m.from_user_id === active.other.id || m.to_user_id === active.other.id)) {
-          setActive((cur) => cur ? { ...cur, messages: [...cur.messages, m] } : cur);
-          setTimeout(() => scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight, behavior: "smooth" }), 30);
+        if (msg.type === "message") {
+          const m = msg.message;
+          if (active && (m.from_user_id === active.other.id || m.to_user_id === active.other.id)) {
+            setActive((cur) => cur ? { ...cur, messages: [...cur.messages, m] } : cur);
+            setTimeout(() => scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight, behavior: "smooth" }), 30);
+          }
+          loadThreads();
+        } else if (msg.type === "message_deleted") {
+          setActive((cur) => cur ? { ...cur, messages: cur.messages.map((m) => m.id === msg.message_id ? { ...m, deleted: true, deleted_at: msg.deleted_at, body: "", attachment: null } : m) } : cur);
+          loadThreads();
+        } else if (msg.type === "read") {
+          // Other party read my messages up to msg.up_to_message_id
+          setActive((cur) => {
+            if (!cur) return cur;
+            let hit = false;
+            const next = cur.messages.map((m) => {
+              if (m.from_user_id === user?.id && !m.read) {
+                const stamped = { ...m, read: true, read_at: msg.read_at };
+                if (m.id === msg.up_to_message_id) hit = true;
+                return stamped;
+              }
+              return m;
+            });
+            return hit ? { ...cur, messages: next } : { ...cur, messages: next };
+          });
         }
-        // Refresh thread list to bump ordering + unread counts
-        loadThreads();
       } catch {}
     };
     ws.onclose = () => { wsRef.current = null; };
@@ -108,6 +125,31 @@ export default function Messages() {
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
   };
+
+  const DELETE_WINDOW_MS = 5 * 60 * 1000;
+  const canDelete = (m) => {
+    if (!m || m.deleted) return false;
+    if (m.from_user_id !== user?.id) return false;
+    return (Date.now() - new Date(m.created_at).getTime()) < DELETE_WINDOW_MS;
+  };
+  const deleteMsg = async (m) => {
+    if (!window.confirm("Delete this message? This cannot be undone.")) return;
+    try {
+      await api.delete(`/messages/${m.id}`);
+    } catch (e) {
+      toast.error(formatError(e));
+    }
+  };
+
+  // Find last of MY messages that has been read (for "Seen" tick)
+  const lastReadMineId = (() => {
+    if (!active?.messages) return null;
+    for (let i = active.messages.length - 1; i >= 0; i--) {
+      const m = active.messages[i];
+      if (m.from_user_id === user?.id && m.read) return m.id;
+    }
+    return null;
+  })();
 
   const initials = (name) => name.split(" ").map((n) => n[0]).slice(0, 2).join("").toUpperCase();
 
@@ -168,28 +210,64 @@ export default function Messages() {
                   const mine = m.from_user_id === user?.id;
                   const att = m.attachment;
                   const attUrl = att ? `${API}/messages/attachment/${att.id}` : null;
+                  const isDeleted = !!m.deleted;
+                  const showSeen = mine && m.id === lastReadMineId && !isDeleted;
                   return (
-                    <div key={m.id} className={`flex ${mine ? "justify-end" : "justify-start"}`} data-testid={`msg-${m.id}`}>
-                      <div className={`max-w-[75%] rounded-2xl px-4 py-2 ${mine ? "bg-primary text-white rounded-br-sm" : "bg-white border border-border rounded-bl-sm"}`}>
-                        {att && att.is_image && (
-                          <a href={attUrl} target="_blank" rel="noopener noreferrer" className="block mb-2 -mx-2 -mt-1" data-testid={`msg-image-${m.id}`}>
-                            <img src={attUrl} alt={att.filename} className="rounded-xl max-h-72 object-cover w-full" />
-                          </a>
+                    <div key={m.id} className={`group flex ${mine ? "justify-end" : "justify-start"}`} data-testid={`msg-${m.id}`}>
+                      <div className="flex items-center gap-2 max-w-[80%]">
+                        {mine && canDelete(m) && (
+                          <button onClick={() => deleteMsg(m)} title="Delete (within 5 min)"
+                            className="opacity-0 group-hover:opacity-100 transition p-1.5 rounded-full text-muted-foreground hover:text-destructive hover:bg-secondary"
+                            data-testid={`msg-delete-${m.id}`}>
+                            <Trash2 size={14} />
+                          </button>
                         )}
-                        {att && !att.is_image && (
-                          <a href={attUrl} target="_blank" rel="noopener noreferrer"
-                            className={`flex items-center gap-3 rounded-xl px-3 py-2 mb-1 border ${mine ? "bg-white/10 border-white/20 hover:bg-white/20" : "bg-secondary/70 border-border hover:bg-secondary"} transition`}
-                            data-testid={`msg-file-${m.id}`}>
-                            <FileText size={22} className={mine ? "text-white" : "text-primary"} />
-                            <div className="flex-1 min-w-0">
-                              <div className={`font-semibold text-sm truncate ${mine ? "text-white" : ""}`}>{att.filename}</div>
-                              <div className={`text-[0.7rem] ${mine ? "text-white/70" : "text-muted-foreground"}`}>{humanSize(att.size)} · {att.content_type.split("/")[1]?.toUpperCase()}</div>
+                        <div className="flex flex-col items-stretch">
+                          <div className={`rounded-2xl px-4 py-2 ${
+                            isDeleted ? "bg-secondary/60 border border-dashed border-border text-muted-foreground italic" :
+                            mine ? "bg-primary text-white rounded-br-sm" : "bg-white border border-border rounded-bl-sm"
+                          }`}>
+                            {isDeleted ? (
+                              <div className="text-sm">This message was deleted</div>
+                            ) : (
+                              <>
+                                {att && att.is_image && (
+                                  <a href={attUrl} target="_blank" rel="noopener noreferrer" className="block mb-2 -mx-2 -mt-1" data-testid={`msg-image-${m.id}`}>
+                                    <img src={attUrl} alt={att.filename} className="rounded-xl max-h-72 object-cover w-full" />
+                                  </a>
+                                )}
+                                {att && !att.is_image && (
+                                  <a href={attUrl} target="_blank" rel="noopener noreferrer"
+                                    className={`flex items-center gap-3 rounded-xl px-3 py-2 mb-1 border ${mine ? "bg-white/10 border-white/20 hover:bg-white/20" : "bg-secondary/70 border-border hover:bg-secondary"} transition`}
+                                    data-testid={`msg-file-${m.id}`}>
+                                    <FileText size={22} className={mine ? "text-white" : "text-primary"} />
+                                    <div className="flex-1 min-w-0">
+                                      <div className={`font-semibold text-sm truncate ${mine ? "text-white" : ""}`}>{att.filename}</div>
+                                      <div className={`text-[0.7rem] ${mine ? "text-white/70" : "text-muted-foreground"}`}>{humanSize(att.size)} · {att.content_type.split("/")[1]?.toUpperCase()}</div>
+                                    </div>
+                                    <Download size={15} className={mine ? "text-white/80" : "text-muted-foreground"} />
+                                  </a>
+                                )}
+                                {m.body && <div className="whitespace-pre-wrap break-words text-sm">{m.body}</div>}
+                              </>
+                            )}
+                            <div className={`text-[0.65rem] mt-1 flex items-center justify-end gap-1 ${
+                              isDeleted ? "text-muted-foreground" : mine ? "text-white/70" : "text-muted-foreground"
+                            }`}>
+                              {fmtTime(m.created_at)}
+                              {mine && !isDeleted && (
+                                m.read
+                                  ? <CheckCheck size={12} className="text-white" data-testid={`msg-tick-read-${m.id}`} />
+                                  : <Check size={12} className="text-white/70" data-testid={`msg-tick-sent-${m.id}`} />
+                              )}
                             </div>
-                            <Download size={15} className={mine ? "text-white/80" : "text-muted-foreground"} />
-                          </a>
-                        )}
-                        {m.body && <div className="whitespace-pre-wrap break-words text-sm">{m.body}</div>}
-                        <div className={`text-[0.65rem] mt-1 ${mine ? "text-white/70" : "text-muted-foreground"}`}>{fmtTime(m.created_at)}</div>
+                          </div>
+                          {showSeen && (
+                            <div className="text-[0.65rem] text-muted-foreground text-right mt-0.5 mr-1" data-testid={`seen-${m.id}`}>
+                              Seen {m.read_at ? fmtTime(m.read_at) : ""}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
                   );

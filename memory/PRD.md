@@ -50,6 +50,7 @@ Build a 1-to-1 online tutoring platform (Phase 1, web-only) that connects studen
 - [x] **Live messaging (student ↔ tutor)** — REST for history + WebSocket for real-time push. Threads list with unread counts, message-read tracking, cross-tab echo. Enforces booking-relationship auth (strangers can't DM). (Jan 2026)
 - [x] **Attendance tracking** — `student_joined_at` / `tutor_joined_at` auto-set when each party enters the built-in classroom; visible on booking detail. Idempotent, non-participants 403. (Jan 2026)
 - [x] **File sharing in chat** — tutors and students can attach worksheets/PDFs/images (10 MB max, 10 allowed MIME types). Stored in MongoDB GridFS (`chat_attachments` bucket). Recipient-scoped auth on download, inline image thumbnails, real-time WS push. (Jan 2026)
+- [x] **Message deletion (5-min window) + read receipts** — sender can delete their own messages within 5 minutes (admins anytime, GridFS blob cleaned up). Deleted messages become italic tombstones for both parties in real time. Own messages show grey single-tick when sent → white double-tick + "Seen HH:MM" caption once the other party opens the thread. (Jan 2026)
 - Cancellation/refund workflow (with cutoff windows) — deferred until payments
 - Stripe payment integration (playbook-based)
 - Tutor profile picture upload to S3

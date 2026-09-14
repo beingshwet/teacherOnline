@@ -788,11 +788,12 @@ async def list_threads(user: dict = Depends(get_current_user)):
         last = row["last"]
         other_id = last["from_user_id"] if last["to_user_id"] == user["id"] else last["to_user_id"]
         other = await db.users.find_one({"id": other_id}, {"_id": 0, "first_name": 1, "last_name": 1, "role": 1})
+        preview = "This message was deleted" if last.get("deleted") else (last["body"] or ("📎 " + (last.get("attachment") or {}).get("filename", "attachment")))
         threads.append({
             "other_user_id": other_id,
             "other_name": f"{other.get('first_name','')} {other.get('last_name','')}".strip() if other else "User",
             "other_role": other.get("role") if other else "",
-            "last_body": last["body"],
+            "last_body": preview,
             "last_at": last["created_at"],
             "last_from_me": last["from_user_id"] == user["id"],
             "unread": row["unread"],
@@ -807,11 +808,33 @@ async def get_thread(other_user_id: str, user: dict = Depends(get_current_user),
     key = _thread_key(user["id"], other_user_id)
     cursor = db.messages.find({"thread_key": key}, {"_id": 0}).sort("created_at", 1).limit(limit)
     msgs = [m async for m in cursor]
-    # mark as read on fetch
-    await db.messages.update_many(
-        {"thread_key": key, "to_user_id": user["id"], "read": False},
-        {"$set": {"read": True, "read_at": iso(now_utc())}},
-    )
+    # Find unread messages sent TO me, mark them read, and push a read receipt to the other party
+    unread_ids = [m["id"] for m in msgs if m["to_user_id"] == user["id"] and not m.get("read")]
+    if unread_ids:
+        read_at = iso(now_utc())
+        await db.messages.update_many(
+            {"thread_key": key, "to_user_id": user["id"], "read": False},
+            {"$set": {"read": True, "read_at": read_at}},
+        )
+        # Reflect in the response we're about to return
+        for m in msgs:
+            if m["id"] in unread_ids:
+                m["read"] = True
+                m["read_at"] = read_at
+        # Broadcast read receipt to the other party (so their "sent → seen" flips in real time)
+        latest_read_id = unread_ids[-1]
+        await ws_hub.broadcast(other_user_id, {
+            "type": "read",
+            "thread_key": key,
+            "reader_id": user["id"],
+            "up_to_message_id": latest_read_id,
+            "read_at": read_at,
+        })
+    # Redact deleted message bodies (kept as tombstones for UI)
+    for m in msgs:
+        if m.get("deleted"):
+            m["body"] = ""
+            m["attachment"] = None
     return {
         "other": {"id": other_user_id, "name": f"{other.get('first_name','')} {other.get('last_name','')}".strip(), "role": other.get("role")},
         "messages": msgs,
@@ -927,6 +950,51 @@ async def download_attachment(file_id: str, user: dict = Depends(get_current_use
         "Content-Disposition": disposition,
         "Cache-Control": "private, max-age=3600",
     })
+
+# Message deletion: sender within window OR admin anytime
+DELETE_WINDOW_MINUTES = 5
+
+@api.delete("/messages/{message_id}")
+async def delete_message(message_id: str, user: dict = Depends(get_current_user)):
+    m = await db.messages.find_one({"id": message_id}, {"_id": 0})
+    if not m:
+        raise HTTPException(404, "Message not found")
+    is_admin = user["role"] in ("admin", "super_admin")
+    is_sender = m["from_user_id"] == user["id"]
+    if not (is_admin or is_sender):
+        raise HTTPException(403, "You can only delete your own messages")
+    if m.get("deleted"):
+        return {"ok": True, "already_deleted": True}
+    # Enforce time window for the sender (admins unrestricted)
+    if not is_admin:
+        created = parse_iso(m["created_at"])
+        if now_utc() - created > timedelta(minutes=DELETE_WINDOW_MINUTES):
+            raise HTTPException(400, {
+                "code": "DELETE_WINDOW_EXPIRED",
+                "message": f"You can only delete messages within {DELETE_WINDOW_MINUTES} minutes of sending.",
+            })
+    # If attachment: remove from GridFS
+    att = m.get("attachment")
+    if att and att.get("id"):
+        try:
+            await fs.delete(ObjectId(att["id"]))
+        except Exception:
+            log.warning("GridFS delete failed for %s (may already be gone)", att["id"])
+    now_iso = iso(now_utc())
+    await db.messages.update_one({"id": message_id}, {"$set": {
+        "deleted": True, "deleted_at": now_iso, "deleted_by": user["id"],
+        "body": "", "attachment": None, "read": True,
+    }})
+    payload = {
+        "type": "message_deleted",
+        "message_id": message_id,
+        "thread_key": m["thread_key"],
+        "deleted_at": now_iso,
+        "deleted_by": user["id"],
+    }
+    await ws_hub.broadcast(m["from_user_id"], payload)
+    await ws_hub.broadcast(m["to_user_id"], payload)
+    return {"ok": True}
 
 class _WSHub:
     def __init__(self):

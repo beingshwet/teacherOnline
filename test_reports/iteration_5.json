@@ -1,0 +1,49 @@
+{
+  "summary": "Iteration 5 — message deletion + read receipts. Backend: 10/10 new pytest cases pass in /app/backend/tests/test_iter5_delete_and_read.py; full regression 47/47 iter2+iter3+iter4 still green (total 57/57). Frontend: end-to-end verified with two browser contexts (tutor + student). Fresh text send → single grey tick (msg-tick-sent-<id>); after student opens thread server broadcasts type='read' up_to_message_id → tutor UI flips to double-check (msg-tick-read-<id>) and 'Seen 07:10 PM' caption (seen-<id>) appears below the last read own message. Hovering own <5-min-old message reveals trash icon (msg-delete-<id>); clicking + confirming replaces the bubble with an italic muted 'This message was deleted' pill, keyed msg-<id>. Student browser receives WS message_deleted and mirrors the tombstone live. Deleted bubbles correctly hide both ticks and the Seen caption. Older messages (>5 min) never expose the trash icon. Attachment GridFS blob is deleted (verified via GET 404). Thread list preview shows 'You: This message was deleted' tombstone.",
+  "features_verified": {
+    "DELETE_sender_within_window_200": "PASS",
+    "DELETE_idempotent_already_deleted": "PASS",
+    "DELETE_403_stranger": "PASS",
+    "DELETE_404_unknown": "PASS",
+    "DELETE_WINDOW_EXPIRED_400_dict_code": "PASS — detail={code:'DELETE_WINDOW_EXPIRED', message:...}",
+    "DELETE_admin_override_after_window": "PASS",
+    "GridFS_blob_removed_on_delete": "PASS — GET /api/messages/attachment/{id} returns 404 after delete",
+    "thread_returns_deleted_true_body_empty_attachment_null_read_true": "PASS",
+    "threads_list_last_body_tombstone": "PASS — 'This message was deleted'",
+    "ws_message_deleted_both_parties": "PASS — sender + recipient both receive {type:message_deleted, message_id, thread_key, deleted_at, deleted_by}",
+    "read_receipt_ws_broadcast_to_sender": "PASS — {type:'read', reader_id, thread_key, up_to_message_id, read_at}",
+    "GET_thread_response_marks_read_and_returns_read_at": "PASS",
+    "UI_hover_shows_trash_icon_on_fresh_own_msg": "PASS (msg-delete-<id>)",
+    "UI_old_own_msg_hides_trash_icon": "PASS",
+    "UI_confirm_dialog_and_tombstone_replacement": "PASS — italic muted 'This message was deleted' pill in-place, msg-<id> preserved",
+    "UI_single_tick_before_read": "PASS (msg-tick-sent-<id>)",
+    "UI_double_check_and_seen_caption_after_other_reads": "PASS (msg-tick-read-<id> + seen-<id> caption 'Seen 07:10 PM')",
+    "UI_deleted_bubble_no_ticks_no_seen": "PASS",
+    "UI_other_party_gets_ws_tombstone_live": "PASS"
+  },
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter5_delete_and_read.py",
+    "/app/test_reports/pytest/iter5.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is now 1514 lines. Splitting into routers (messaging/attachments/attendance/admin) remains recommended.",
+    "In delete_message, the read-status update sets read=true but does not populate read_at for the deleted-and-orphaned unread case; because it's read=true + deleted=true the UI already suppresses the tick — non-blocking, just for consistency in DB.",
+    "delete_message enforces window via now_utc() - parse_iso(created_at); parse_iso relies on Python 3.11 fromisoformat with tz suffix. Test uses '+00:00' explicitly — works. Confirm parse_iso handles 'Z' suffix too if any producer ever emits it (grep suggests only iso(now_utc()) which uses timezone.utc — OK).",
+    "WS 'read' broadcast: server marks read via GET /messages/thread and broadcasts up_to_message_id as the LAST unread id in the batch. However, the frontend reducer marks ALL prior own unread msgs as read (correct). But the Seen caption only shows on the LAST read message, whereas up_to_message_id may not always equal the LAST own message read (it is the last unread id from B's perspective, which is A's latest sent). Semantically OK.",
+    "Messages.jsx has now grown to 311 lines with substantial branching per bubble type. Extract MessageBubble into its own component for maintainability.",
+    "Frontend: on WS 'message_deleted', we mutate bubble state directly but do not clear read/read_at → deleted bubble still carries read=true from server. UI already gates ticks on !isDeleted so harmless — leaving as info.",
+    "canDelete() uses client-side Date.now(); if user clock is off by >5 min the button may appear enabled for expired messages. Server still rejects (400), and UI shows toast — acceptable.",
+    "Prior iter4 findings remain unaddressed (Content-Disposition filename sanitization; MIME sniffing; GridFS orphan cleanup on partial upload failure). Non-blocking for iter5."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter5_delete_and_read.py"],
+  "success_rate": {"backend": "100% (10/10 iter5 + 47/47 prior = 57/57)", "frontend": "100% (all delete + read-receipt flows verified with two-context E2E)"},
+  "test_credentials": "admin@example.com/Admin@12345, tutor@example.com/Tutor@12345, student@example.com/Student@12345 — all working",
+  "seed_data_creation": "Created ~5 short-lived text messages between Demo Tutor <-> Demo Student for delete/read tests, 1 attachment (PNG) subsequently deleted (GridFS + doc), 1 stranger student account (Password@123) for 403 test, and one message with created_at mutated 10 min into the past (subsequently deleted by admin). Nothing dangerous.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Run backend iter5 suite: `REACT_APP_BACKEND_URL=<url> MONGO_URL=mongodb://localhost:27017 DB_NAME=tutoring_platform python -m pytest backend/tests/test_iter5_delete_and_read.py -o addopts='' -v`. Suite uses pytest.iter5_deleted_id module state to chain tests so keep addopts='' (no xdist). Window-expiry test directly patches created_at in Mongo → needs MONGO_URL access. WS tests use `websockets` + asyncio.run; open a tutor OR student socket, sleep 1.5s, then trigger the delete/read from another thread via run_in_executor — pattern works reliably on shared cluster. Read receipts are broadcast on GET /messages/thread — the UI relies on the reader RE-fetching to trigger it (WS receive of a new message alone does NOT auto-mark read).",
+  "rca of the issue": "N/A — feature works end-to-end."
+}
