@@ -484,6 +484,7 @@ async def _hydrate_booking(b: dict) -> dict:
     out = dict(b); out.pop("_id", None)
     out["student_name"] = f"{s['first_name']} {s['last_name']}" if s else ""
     out["tutor_name"] = f"{t['first_name']} {t['last_name']}" if t else ""
+    out.setdefault("video_provider", "google_meet" if out.get("meet_url") else "builtin")
     return out
 
 @api.get("/bookings")
@@ -562,6 +563,107 @@ async def set_meet_url(booking_id: str, body: MeetUrlReq, user: dict = Depends(r
     await db.bookings.update_one({"id": booking_id}, {"$set": {"meet_url": body.meet_url, "updated_at": iso(now_utc())}})
     await notify(b["student_id"], "MEET_URL_ADDED", "Class link ready", "Your tutor added the Google Meet link.")
     return {"ok": True, "meet_url": body.meet_url}
+
+# ============================================================
+# Video provider abstraction (Google Meet + Built-in Jitsi)
+# ============================================================
+class VideoProvider:
+    key = "base"
+    async def prepare_room(self, booking: dict) -> dict:
+        raise NotImplementedError
+    def join_info(self, booking: dict, user: dict) -> dict:
+        raise NotImplementedError
+
+class GoogleMeetProvider(VideoProvider):
+    key = "google_meet"
+    async def prepare_room(self, booking: dict) -> dict:
+        return {"provider": "google_meet", "meet_url": booking.get("meet_url", "")}
+    def join_info(self, booking: dict, user: dict) -> dict:
+        return {"provider": "google_meet", "join_url": booking.get("meet_url", ""), "embed": False}
+
+class JitsiProvider(VideoProvider):
+    key = "builtin"
+    domain = "meet.jit.si"
+    async def prepare_room(self, booking: dict) -> dict:
+        room = booking.get("video_room_name")
+        if not room:
+            # short, unguessable room name tied to booking
+            room = f"tutorhive-{booking['id'].replace('-', '')[:16]}-{uuid.uuid4().hex[:8]}"
+        return {"provider": "builtin", "domain": self.domain, "room_name": room}
+    def join_info(self, booking: dict, user: dict) -> dict:
+        room = booking.get("video_room_name") or ""
+        return {
+            "provider": "builtin",
+            "domain": self.domain,
+            "room_name": room,
+            "user": {
+                "displayName": f"{user.get('first_name','')} {user.get('last_name','')}".strip(),
+                "email": user.get("email", ""),
+            },
+            "is_moderator": user.get("id") == booking.get("tutor_id") or user.get("role") in ("admin", "super_admin"),
+            "embed": True,
+        }
+
+VIDEO_PROVIDERS = {p.key: p() for p in [GoogleMeetProvider, JitsiProvider]}
+
+class VideoProviderReq(BaseModel):
+    provider: Literal["google_meet", "builtin"]
+
+@api.put("/bookings/{booking_id}/video-provider")
+async def set_video_provider(booking_id: str, body: VideoProviderReq, user: dict = Depends(require_roles("tutor", "admin", "super_admin"))):
+    b = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
+    if not b:
+        raise HTTPException(404, "Booking not found")
+    if user["role"] == "tutor" and b["tutor_id"] != user["id"]:
+        raise HTTPException(403, "Forbidden")
+    provider = VIDEO_PROVIDERS[body.provider]
+    b["video_provider"] = body.provider
+    room = await provider.prepare_room(b)
+    update = {"video_provider": body.provider, "updated_at": iso(now_utc())}
+    if body.provider == "builtin":
+        update["video_room_name"] = room["room_name"]
+    await db.bookings.update_one({"id": booking_id}, {"$set": update})
+    await notify(b["student_id"], "VIDEO_ROOM_READY",
+                 "Classroom ready",
+                 "Your tutor set up the classroom for your upcoming session.")
+    return {"ok": True, "provider": body.provider, "room": room}
+
+@api.get("/bookings/{booking_id}/video-room")
+async def get_video_room(booking_id: str, user: dict = Depends(get_current_user)):
+    b = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
+    if not b:
+        raise HTTPException(404, "Booking not found")
+    if user["role"] == "student" and b["student_id"] != user["id"]:
+        raise HTTPException(403, "Forbidden")
+    if user["role"] == "tutor" and b["tutor_id"] != user["id"]:
+        raise HTTPException(403, "Forbidden")
+    if b["status"] not in ("CONFIRMED", "COMPLETED"):
+        raise HTTPException(400, "Session is not available")
+    # Enforce join window: 10 min before start → 30 min after end
+    start = parse_iso(b["start_time"]); end = parse_iso(b["end_time"])
+    now = now_utc()
+    open_from = start - timedelta(minutes=10)
+    open_until = end + timedelta(minutes=30)
+    if not (open_from <= now <= open_until):
+        raise HTTPException(400, {
+            "code": "ROOM_CLOSED",
+            "message": "Classroom opens 10 minutes before session start.",
+            "opens_at": iso(open_from),
+            "closes_at": iso(open_until),
+        })
+    provider_key = b.get("video_provider") or ("google_meet" if b.get("meet_url") else "builtin")
+    provider = VIDEO_PROVIDERS[provider_key]
+    if provider_key == "builtin" and not b.get("video_room_name"):
+        room = await provider.prepare_room(b)
+        await db.bookings.update_one({"id": booking_id}, {"$set": {"video_room_name": room["room_name"], "video_provider": "builtin"}})
+        b["video_room_name"] = room["room_name"]
+    info = provider.join_info(b, user)
+    info["booking"] = {
+        "id": b["id"], "subject": b["subject"],
+        "start_time": b["start_time"], "end_time": b["end_time"],
+        "tutor_id": b["tutor_id"], "student_id": b["student_id"],
+    }
+    return info
 
 # ============================================================
 # Reviews

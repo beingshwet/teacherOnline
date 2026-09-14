@@ -49,6 +49,10 @@ export function BookingDetail({ role }) {
   const load = () => api.get(`/bookings/${id}`).then((r) => { setB(r.data); setMeetUrl(r.data.meet_url || ""); });
   useEffect(() => { load(); }, [id]);
 
+  const setProvider = async (provider) => {
+    try { await api.put(`/bookings/${id}/video-provider`, { provider }); toast.success("Class format updated"); load(); }
+    catch (e) { toast.error(formatError(e)); }
+  };
   const saveMeet = async () => {
     try { await api.put(`/bookings/${id}/meet-url`, { meet_url: meetUrl }); toast.success("Meet link saved"); load(); }
     catch (e) { toast.error(formatError(e)); }
@@ -87,17 +91,49 @@ export function BookingDetail({ role }) {
             {role === "tutor" && <div><div className="label">Your earnings</div><div className="font-semibold">${b.tutor_earnings}</div></div>}
           </div>
 
-          <div className="mt-8">
-            <div className="label">Google Meet link</div>
+          <div className="mt-8 border-t border-border pt-6">
+            <div className="label">Class format</div>
             {role === "tutor" ? (
-              <div className="flex gap-2">
-                <input className="field" placeholder="https://meet.google.com/xxx-xxxx-xxx" value={meetUrl} onChange={(e) => setMeetUrl(e.target.value)} data-testid="meet-url-input" />
-                <button className="btn-outline" onClick={saveMeet} data-testid="meet-url-save">Save</button>
+              <div className="flex gap-2 mb-4">
+                {[
+                  { key: "builtin", label: "Built-in classroom", tag: "recommended" },
+                  { key: "google_meet", label: "Google Meet", tag: "" },
+                ].map((opt) => (
+                  <button key={opt.key} onClick={() => setProvider(opt.key)}
+                    className={`flex-1 py-3 px-4 rounded-xl border text-left transition ${b.video_provider === opt.key ? "border-primary bg-accent" : "bg-white border-border hover:bg-secondary"}`}
+                    data-testid={`provider-${opt.key}`}>
+                    <div className="font-semibold text-sm">{opt.label}</div>
+                    {opt.tag && <div className="text-[0.7rem] text-primary mt-0.5">{opt.tag}</div>}
+                  </button>
+                ))}
               </div>
-            ) : b.meet_url ? (
-              <a href={b.meet_url} target="_blank" rel="noopener noreferrer" className="btn-primary" data-testid="join-google-meet"><Video size={15} /> Join Google Meet</a>
             ) : (
-              <div className="text-muted-foreground text-sm">Waiting for tutor to add link…</div>
+              <div className="chip mb-3" data-testid="provider-chip">
+                {b.video_provider === "builtin" ? "Built-in classroom" : "Google Meet"}
+              </div>
+            )}
+
+            {b.video_provider === "google_meet" ? (
+              <div>
+                <div className="label">Google Meet link</div>
+                {role === "tutor" ? (
+                  <div className="flex gap-2">
+                    <input className="field" placeholder="https://meet.google.com/xxx-xxxx-xxx" value={meetUrl} onChange={(e) => setMeetUrl(e.target.value)} data-testid="meet-url-input" />
+                    <button className="btn-outline" onClick={saveMeet} data-testid="meet-url-save">Save</button>
+                  </div>
+                ) : b.meet_url ? (
+                  <a href={b.meet_url} target="_blank" rel="noopener noreferrer" className="btn-primary" data-testid="join-google-meet"><Video size={15} /> Join Google Meet</a>
+                ) : (
+                  <div className="text-muted-foreground text-sm">Waiting for tutor to add link…</div>
+                )}
+              </div>
+            ) : (
+              <div>
+                <div className="text-sm text-muted-foreground mb-3">
+                  Video, screen share, chat, whiteboard, and recording — all built in. Classroom opens 10 min before the session starts.
+                </div>
+                <Link to={`/classroom/${b.id}`} className="btn-primary" data-testid="launch-classroom"><Video size={15} /> Launch classroom</Link>
+              </div>
             )}
           </div>
         </div>

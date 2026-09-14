@@ -12,6 +12,7 @@ import { BookingsList, BookingDetail } from "@/pages/Bookings";
 import { TutorDashboard, TutorProfileEdit, TutorAvailability, TutorEarnings } from "@/pages/TutorPages";
 import { AdminDashboard, AdminTutors, AdminStudents, AdminBookings } from "@/pages/AdminPages";
 import AdminEmailLog from "@/pages/AdminEmailLog";
+import Classroom from "@/pages/Classroom";
 import Notifications from "@/pages/Notifications";
 
 function Protected({ children, roles }) {
@@ -57,6 +58,9 @@ function App() {
           <Route path="/admin/students" element={<Protected roles={["admin", "super_admin"]}><AdminStudents /></Protected>} />
           <Route path="/admin/bookings" element={<Protected roles={["admin", "super_admin"]}><AdminBookings /></Protected>} />
           <Route path="/admin/emails" element={<Protected roles={["admin", "super_admin"]}><AdminEmailLog /></Protected>} />
+
+          {/* Live classroom (Jitsi) — accessible by student or tutor of the booking */}
+          <Route path="/classroom/:id" element={<Protected roles={["student", "tutor", "admin", "super_admin"]}><Classroom /></Protected>} />
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

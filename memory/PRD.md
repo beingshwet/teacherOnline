@@ -45,6 +45,7 @@ Build a 1-to-1 online tutoring platform (Phase 1, web-only) that connects studen
 ### P1 (next up)
 - [x] **Session reminder scheduler (24h / 1h / 10m) with mock email provider + in-app notifications** (Jan 2026)
 - [x] Admin email log viewer (/admin/emails) with manual "run now" trigger
+- [x] **Built-in live classroom via Jitsi Meet** (free, no API keys) — video, screen share, chat, whiteboard, recording. Tutor picks per-session between "Built-in classroom" and "Google Meet". Room opens 10 min before start, closes 30 min after end. (Jan 2026)
 - Swap MockEmailProvider for SendGrid or Resend (drop-in — implement EmailProvider.send)
 - Messaging (student ↔ tutor) via WebSocket
 - Cancellation/refund workflow (with cutoff windows)

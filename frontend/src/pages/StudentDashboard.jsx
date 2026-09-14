@@ -53,7 +53,11 @@ export default function StudentDashboard() {
                   <div className="text-sm text-muted-foreground">{fmtDate(b.start_time)} · 60 min · <span className="chip ml-1">{b.status}</span></div>
                 </div>
                 <div className="flex gap-2">
-                  {b.meet_url && <a href={b.meet_url} target="_blank" rel="noopener noreferrer" className="btn-primary" data-testid={`join-${b.id}`}><Video size={15} /> Join class</a>}
+                  {b.video_provider === "builtin" ? (
+                    <Link to={`/classroom/${b.id}`} className="btn-primary" data-testid={`join-${b.id}`}><Video size={15} /> Launch classroom</Link>
+                  ) : b.meet_url ? (
+                    <a href={b.meet_url} target="_blank" rel="noopener noreferrer" className="btn-primary" data-testid={`join-${b.id}`}><Video size={15} /> Join class</a>
+                  ) : null}
                   <Link to={`/student/bookings/${b.id}`} className="btn-outline">Details</Link>
                 </div>
               </div>
