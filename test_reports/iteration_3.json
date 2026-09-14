@@ -1,0 +1,39 @@
+{
+  "summary": "Iteration 3 — Verified Resend email provider swap, REST + WebSocket messaging, and attendance tracking. 15/15 backend pytest cases pass in /app/backend/tests/test_iter3_features.py. All previous iter2 regression tests still pass (12/12). Frontend UI verified: student & tutor sidebars contain Messages link (data-testids sb-student-messages, sb-tutor-messages), admin sidebar has all 5 items (Overview, Tutors, Students, Bookings, Email log). Student messaging UI end-to-end works — thread list renders 1 thread (Demo Tutor), messages appear as terracotta bubbles for own messages and white bubbles for tutor, both Enter-key and click-Send flows post successfully and show up in the scroller in real time (WebSocket echo). Tutor Messages tab lists the student thread. Booking detail page correctly renders 'Student joined' and 'Tutor joined' timestamps (data-testids student-joined & tutor-joined) — verified with booking f2e93aa8 (both timestamps rendered as locale strings).",
+  "features_verified": {
+    "resend_email_swap": "PASS — POST /api/admin/reminders/run returns {ok:true}; GET /api/admin/email-log rows all have provider='resend' with status='failed' and error 'Invalid `to` field ... please use our testing email address instead of domains like `example.com`'. Wiring confirmed (test-mode rejection expected).",
+    "messaging_rest": "PASS — POST /api/messages validates empty (400), oversize>4000 (400), stranger-without-booking (403). Successful send returns full message dict (thread_key, from_user_id, to_user_id, body, created_at, read=false, no _id leak).",
+    "messaging_threads_list": "PASS — GET /api/messages/threads returns per-user list with other_user_id, other_name, last_body, last_at, unread count.",
+    "messaging_thread_read": "PASS — GET /api/messages/thread/{other} returns ascending time-ordered messages; unread messages sent TO caller are marked read (verified next threads call shows unread=0).",
+    "websocket_hello_push": "PASS — connect to wss://<host>/api/ws/messages?token=<jwt>, server emits {type:'hello', user_id}. When other party POSTs a message, client receives {type:'message', message:{...}} within 1s. Missing-token connections are closed by server.",
+    "attendance": "PASS — POST /api/bookings/{id}/attendance/join by student sets student_joined_at; by tutor sets tutor_joined_at; second call idempotent (ts unchanged); non-participant→403; GET /api/bookings/{id} exposes both timestamps.",
+    "frontend_sidebars": "PASS — sb-student-messages, sb-tutor-messages both present; admin sidebar unchanged (5 items).",
+    "frontend_messaging_ui": "PASS — student can view thread with Demo Tutor, send via Enter and via message-send button; new messages render immediately in scroller.",
+    "frontend_booking_attendance_display": "PASS — /student/bookings/{id} shows student-joined and tutor-joined timestamps when set; falls back to 'Not yet' otherwise.",
+    "frontend_classroom_auto_attendance": "WIRING VERIFIED — Classroom.jsx calls POST /api/bookings/{id}/attendance/join in useEffect after /bookings/{id}/video-room success. Direct UI end-to-end test not possible without an in-window CONFIRMED booking (video-room 400s outside window; attendance call is chained after .then, so it only fires when classroom is actually open). This is the intended behavior."
+  },
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter3_features.py",
+    "/app/backend/tests/test_tutorhive.py",
+    "/app/test_reports/pytest/iter3.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is now 1341 lines — routers split is increasingly worthwhile (auth, tutors, bookings, admin, messaging, attendance, email). Not blocking for MVP.",
+    "Messaging: /api/messages authorization allows a match on ANY booking (any status incl. CANCELLED). Consider excluding CANCELLED-only pairs so a cancelled-history user can't DM indefinitely (edge case, low priority).",
+    "WebSocket: broadcast() iterates a list snapshot but doesn't remove dead sockets on send failure — long-running processes may accumulate zombie sockets. Consider awaiting remove() on send exception. Not user-visible; low priority.",
+    "Attendance idempotency uses `$exists: false` filter with two DB round-trips (update + find). Could be a single findOneAndUpdate with returnDocument='after'. Minor.",
+    "Resend provider: for @example.com dev addresses, all reminder emails currently fail — consider adding a dev toggle to route to Resend's testing address (delivered@resend.dev) so demo email log shows a 'sent' row with a message_id.",
+    "Frontend Messages.jsx WebSocket relies solely on same-origin cookie auth — since REACT_APP_BACKEND_URL is same-origin, cookies flow correctly, but appending ?token= as a query param fallback would be more robust for future subdomain deployments."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter3_features.py"],
+  "success_rate": {"backend": "100% (15/15 iter3 + 12/12 iter2)", "frontend": "~95% (all messaging + sidebar + attendance-display flows verified; classroom auto-attendance requires an in-window booking to verify UI-to-DB)"},
+  "test_credentials": "student@example.com/Student@12345, tutor@example.com/Tutor@12345, admin@example.com/Admin@12345 — all working.",
+  "seed_data_creation": "Created 1 fresh stranger tutor (stranger_tutor_*@example.com) and 1 fresh stranger student (stranger_stu_*@example.com) for 403 auth tests. Also created several messages between Demo Student <-> Demo Tutor via tests and UI (harmless, they show as demo history).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter3 backend suite lives at /app/backend/tests/test_iter3_features.py — run with `REACT_APP_BACKEND_URL=<url> python -m pytest backend/tests/test_iter3_features.py -o addopts='' -v`. WebSocket test uses `websockets` (v16.1.1). All 15 tests pass and use pytest.iter3_* module-level state (so keep addopts='' to disable xdist). If new features are added, extend this file. To exercise the classroom-attendance UI auto-ping end-to-end, seed a CONFIRMED booking whose start_time is within 10 min of now — video-room will then succeed, and Classroom.jsx will fire /attendance/join in useEffect.",
+  "rca of the issue": "N/A — no bugs found in this iteration. Resend @example.com failures are expected (Resend test-mode restriction); the wiring is correct."
+}

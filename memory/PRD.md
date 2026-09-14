@@ -45,12 +45,14 @@ Build a 1-to-1 online tutoring platform (Phase 1, web-only) that connects studen
 ### P1 (next up)
 - [x] **Session reminder scheduler (24h / 1h / 10m) with mock email provider + in-app notifications** (Jan 2026)
 - [x] Admin email log viewer (/admin/emails) with manual "run now" trigger
-- [x] **Built-in live classroom via Jitsi Meet** (free, no API keys) — video, screen share, chat, whiteboard, recording. Tutor picks per-session between "Built-in classroom" and "Google Meet". Room opens 10 min before start, closes 30 min after end. (Jan 2026)
-- Swap MockEmailProvider for SendGrid or Resend (drop-in — implement EmailProvider.send)
-- Messaging (student ↔ tutor) via WebSocket
-- Cancellation/refund workflow (with cutoff windows)
+- [x] **Built-in live classroom via Jitsi Meet** (free, no API keys) — video, screen share, chat, whiteboard, recording. Tutor picks per-session. (Jan 2026)
+- [x] **Real email delivery via Resend** — `ResendEmailProvider` swaps in whenever `RESEND_API_KEY` is set; falls back to mock otherwise. Every reminder logs to the admin email log with provider, status, message id, and error. HTML template is inline-styled and email-safe. (Jan 2026)
+- [x] **Live messaging (student ↔ tutor)** — REST for history + WebSocket for real-time push. Threads list with unread counts, message-read tracking, cross-tab echo. Enforces booking-relationship auth (strangers can't DM). (Jan 2026)
+- [x] **Attendance tracking** — `student_joined_at` / `tutor_joined_at` auto-set when each party enters the built-in classroom; visible on booking detail. Idempotent, non-participants 403. (Jan 2026)
+- Cancellation/refund workflow (with cutoff windows) — deferred until payments
 - Stripe payment integration (playbook-based)
 - Tutor profile picture upload to S3
+- Verify a Resend domain to send emails to arbitrary recipients (currently test-mode only)
 
 ### P2
 - Timezone-aware availability (currently UTC only)

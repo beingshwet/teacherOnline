@@ -34,7 +34,11 @@ export default function Classroom() {
   useEffect(() => {
     setLoading(true);
     api.get(`/bookings/${id}/video-room`)
-      .then((r) => setInfo(r.data))
+      .then((r) => {
+        setInfo(r.data);
+        // Auto-mark attendance in the background
+        api.post(`/bookings/${id}/attendance/join`).catch(() => {});
+      })
       .catch((e) => setError(e.response?.data?.detail || formatError(e)))
       .finally(() => setLoading(false));
   }, [id]);

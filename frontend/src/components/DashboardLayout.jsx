@@ -2,7 +2,7 @@ import { Link, NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   GraduationCap, LayoutDashboard, Users, CalendarClock, Wallet, Bell, LogOut, Search,
-  BookOpen, ShieldCheck, ClipboardList,
+  BookOpen, ShieldCheck, ClipboardList, MessageSquare,
 } from "lucide-react";
 
 const linksByRole = {
@@ -10,6 +10,7 @@ const linksByRole = {
     { to: "/student/dashboard", label: "Dashboard", icon: LayoutDashboard, testid: "sb-student-dashboard" },
     { to: "/tutors", label: "Find a tutor", icon: Search, testid: "sb-student-tutors" },
     { to: "/student/bookings", label: "My sessions", icon: CalendarClock, testid: "sb-student-bookings" },
+    { to: "/student/messages", label: "Messages", icon: MessageSquare, testid: "sb-student-messages" },
     { to: "/student/notifications", label: "Notifications", icon: Bell, testid: "sb-student-notifications" },
   ],
   tutor: [
@@ -17,6 +18,7 @@ const linksByRole = {
     { to: "/tutor/profile", label: "Profile", icon: BookOpen, testid: "sb-tutor-profile" },
     { to: "/tutor/availability", label: "Availability", icon: CalendarClock, testid: "sb-tutor-availability" },
     { to: "/tutor/bookings", label: "Bookings", icon: ClipboardList, testid: "sb-tutor-bookings" },
+    { to: "/tutor/messages", label: "Messages", icon: MessageSquare, testid: "sb-tutor-messages" },
     { to: "/tutor/earnings", label: "Earnings", icon: Wallet, testid: "sb-tutor-earnings" },
   ],
   admin: [

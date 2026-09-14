@@ -89,6 +89,8 @@ export function BookingDetail({ role }) {
             <div><div className="label">Duration</div><div className="font-semibold">{b.duration_minutes} min</div></div>
             <div><div className="label">Price</div><div className="font-semibold">${b.price}</div></div>
             {role === "tutor" && <div><div className="label">Your earnings</div><div className="font-semibold">${b.tutor_earnings}</div></div>}
+            <div><div className="label">Student joined</div><div className="font-semibold text-sm" data-testid="student-joined">{b.student_joined_at ? new Date(b.student_joined_at).toLocaleString() : <span className="text-muted-foreground font-normal">Not yet</span>}</div></div>
+            <div><div className="label">Tutor joined</div><div className="font-semibold text-sm" data-testid="tutor-joined">{b.tutor_joined_at ? new Date(b.tutor_joined_at).toLocaleString() : <span className="text-muted-foreground font-normal">Not yet</span>}</div></div>
           </div>
 
           <div className="mt-8 border-t border-border pt-6">

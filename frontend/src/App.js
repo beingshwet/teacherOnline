@@ -13,6 +13,7 @@ import { TutorDashboard, TutorProfileEdit, TutorAvailability, TutorEarnings } fr
 import { AdminDashboard, AdminTutors, AdminStudents, AdminBookings } from "@/pages/AdminPages";
 import AdminEmailLog from "@/pages/AdminEmailLog";
 import Classroom from "@/pages/Classroom";
+import Messages from "@/pages/Messages";
 import Notifications from "@/pages/Notifications";
 
 function Protected({ children, roles }) {
@@ -43,6 +44,7 @@ function App() {
           <Route path="/student/bookings" element={<Protected roles={["student"]}><BookingsList role="student" /></Protected>} />
           <Route path="/student/bookings/:id" element={<Protected roles={["student"]}><BookingDetail role="student" /></Protected>} />
           <Route path="/student/notifications" element={<Protected roles={["student"]}><Notifications /></Protected>} />
+          <Route path="/student/messages" element={<Protected roles={["student"]}><Messages /></Protected>} />
 
           {/* Tutor */}
           <Route path="/tutor/dashboard" element={<Protected roles={["tutor"]}><TutorDashboard /></Protected>} />
@@ -51,6 +53,7 @@ function App() {
           <Route path="/tutor/bookings" element={<Protected roles={["tutor"]}><BookingsList role="tutor" /></Protected>} />
           <Route path="/tutor/bookings/:id" element={<Protected roles={["tutor"]}><BookingDetail role="tutor" /></Protected>} />
           <Route path="/tutor/earnings" element={<Protected roles={["tutor"]}><TutorEarnings /></Protected>} />
+          <Route path="/tutor/messages" element={<Protected roles={["tutor"]}><Messages /></Protected>} />
 
           {/* Admin */}
           <Route path="/admin/dashboard" element={<Protected roles={["admin", "super_admin"]}><AdminDashboard /></Protected>} />

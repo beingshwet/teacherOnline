@@ -7,11 +7,13 @@ import os
 import uuid
 import logging
 import asyncio
+import json
 import bcrypt
 import jwt
+import resend
 from datetime import datetime, timezone, timedelta, time as dtime, date as ddate
 from typing import List, Optional, Literal
-from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, Query
+from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, Query, WebSocket, WebSocketDisconnect
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
@@ -701,6 +703,183 @@ async def add_review(booking_id: str, body: ReviewCreate, user: dict = Depends(r
     return doc
 
 # ============================================================
+# Attendance
+# ============================================================
+class AttendanceReq(BaseModel):
+    role: Literal["student", "tutor"]  # who is joining
+
+@api.post("/bookings/{booking_id}/attendance/join")
+async def mark_join(booking_id: str, user: dict = Depends(get_current_user)):
+    b = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
+    if not b:
+        raise HTTPException(404, "Booking not found")
+    if user["role"] == "student" and b["student_id"] != user["id"]:
+        raise HTTPException(403, "Forbidden")
+    if user["role"] == "tutor" and b["tutor_id"] != user["id"]:
+        raise HTTPException(403, "Forbidden")
+    field = "student_joined_at" if user["id"] == b["student_id"] else "tutor_joined_at"
+    # Idempotent: only set if not already set
+    await db.bookings.update_one(
+        {"id": booking_id, field: {"$exists": False}},
+        {"$set": {field: iso(now_utc()), "updated_at": iso(now_utc())}},
+    )
+    fresh = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
+    return {"ok": True, "student_joined_at": fresh.get("student_joined_at"), "tutor_joined_at": fresh.get("tutor_joined_at")}
+
+# ============================================================
+# Messaging (student <-> tutor) — REST history + WebSocket push
+# ============================================================
+def _thread_key(a: str, b: str) -> str:
+    return "::".join(sorted([a, b]))
+
+class MessageCreate(BaseModel):
+    to_user_id: str
+    body: str
+
+@api.get("/messages/threads")
+async def list_threads(user: dict = Depends(get_current_user)):
+    """Aggregate: distinct counterparts + last message + unread count."""
+    pipeline = [
+        {"$match": {"$or": [{"from_user_id": user["id"]}, {"to_user_id": user["id"]}]}},
+        {"$sort": {"created_at": -1}},
+        {"$group": {
+            "_id": "$thread_key",
+            "last": {"$first": "$$ROOT"},
+            "unread": {"$sum": {"$cond": [{"$and": [
+                {"$eq": ["$to_user_id", user["id"]]}, {"$eq": ["$read", False]},
+            ]}, 1, 0]}},
+        }},
+        {"$sort": {"last.created_at": -1}},
+        {"$limit": 100},
+    ]
+    threads = []
+    async for row in db.messages.aggregate(pipeline):
+        last = row["last"]
+        other_id = last["from_user_id"] if last["to_user_id"] == user["id"] else last["to_user_id"]
+        other = await db.users.find_one({"id": other_id}, {"_id": 0, "first_name": 1, "last_name": 1, "role": 1})
+        threads.append({
+            "other_user_id": other_id,
+            "other_name": f"{other.get('first_name','')} {other.get('last_name','')}".strip() if other else "User",
+            "other_role": other.get("role") if other else "",
+            "last_body": last["body"],
+            "last_at": last["created_at"],
+            "last_from_me": last["from_user_id"] == user["id"],
+            "unread": row["unread"],
+        })
+    return {"threads": threads}
+
+@api.get("/messages/thread/{other_user_id}")
+async def get_thread(other_user_id: str, user: dict = Depends(get_current_user), limit: int = 200):
+    other = await db.users.find_one({"id": other_user_id}, {"_id": 0, "first_name": 1, "last_name": 1, "role": 1})
+    if not other:
+        raise HTTPException(404, "User not found")
+    key = _thread_key(user["id"], other_user_id)
+    cursor = db.messages.find({"thread_key": key}, {"_id": 0}).sort("created_at", 1).limit(limit)
+    msgs = [m async for m in cursor]
+    # mark as read on fetch
+    await db.messages.update_many(
+        {"thread_key": key, "to_user_id": user["id"], "read": False},
+        {"$set": {"read": True, "read_at": iso(now_utc())}},
+    )
+    return {
+        "other": {"id": other_user_id, "name": f"{other.get('first_name','')} {other.get('last_name','')}".strip(), "role": other.get("role")},
+        "messages": msgs,
+    }
+
+@api.post("/messages")
+async def send_message(body: MessageCreate, user: dict = Depends(get_current_user)):
+    if not body.body.strip():
+        raise HTTPException(400, "Empty message")
+    if len(body.body) > 4000:
+        raise HTTPException(400, "Message too long")
+    other = await db.users.find_one({"id": body.to_user_id}, {"_id": 0})
+    if not other:
+        raise HTTPException(404, "Recipient not found")
+    # Enforce that at least one active booking exists between the pair (privacy: strangers can't DM)
+    has_link = await db.bookings.find_one({
+        "$or": [
+            {"student_id": user["id"], "tutor_id": body.to_user_id},
+            {"student_id": body.to_user_id, "tutor_id": user["id"]},
+        ],
+    })
+    if not has_link and user["role"] not in ("admin", "super_admin"):
+        raise HTTPException(403, "You can only message tutors/students you have a booking with.")
+    msg = {
+        "id": str(uuid.uuid4()),
+        "thread_key": _thread_key(user["id"], body.to_user_id),
+        "from_user_id": user["id"],
+        "to_user_id": body.to_user_id,
+        "body": body.body.strip(),
+        "created_at": iso(now_utc()),
+        "read": False,
+    }
+    await db.messages.insert_one(msg)
+    msg.pop("_id", None)
+    # Push to any live WebSocket subscribers for recipient
+    await ws_hub.broadcast(body.to_user_id, {"type": "message", "message": msg})
+    await ws_hub.broadcast(user["id"], {"type": "message", "message": msg})  # echo to sender's other tabs
+    # Notification for offline recipients
+    from_name = f"{user['first_name']} {user['last_name']}"
+    await notify(body.to_user_id, "NEW_MESSAGE", f"New message from {from_name}", body.body[:120])
+    return msg
+
+class _WSHub:
+    def __init__(self):
+        self.subs: dict[str, set[WebSocket]] = {}
+        self._lock = asyncio.Lock()
+
+    async def add(self, user_id: str, ws: WebSocket):
+        async with self._lock:
+            self.subs.setdefault(user_id, set()).add(ws)
+
+    async def remove(self, user_id: str, ws: WebSocket):
+        async with self._lock:
+            if user_id in self.subs:
+                self.subs[user_id].discard(ws)
+                if not self.subs[user_id]:
+                    self.subs.pop(user_id, None)
+
+    async def broadcast(self, user_id: str, payload: dict):
+        async with self._lock:
+            targets = list(self.subs.get(user_id, set()))
+        for ws in targets:
+            try:
+                await ws.send_text(json.dumps(payload))
+            except Exception:
+                pass
+
+ws_hub = _WSHub()
+
+@app.websocket("/api/ws/messages")
+async def messages_ws(ws: WebSocket, token: Optional[str] = Query(None)):
+    # Accept token via query param OR cookie
+    raw = token or ws.cookies.get("access_token")
+    if not raw:
+        await ws.close(code=1008); return
+    try:
+        payload = jwt.decode(raw, JWT_SECRET, algorithms=[JWT_ALGO])
+        user_id = payload["sub"]
+    except Exception:
+        await ws.close(code=1008); return
+    await ws.accept()
+    await ws_hub.add(user_id, ws)
+    try:
+        await ws.send_text(json.dumps({"type": "hello", "user_id": user_id}))
+        while True:
+            # We keep the connection alive; client mainly listens. Echo pings.
+            data = await ws.receive_text()
+            try:
+                msg = json.loads(data)
+                if msg.get("type") == "ping":
+                    await ws.send_text(json.dumps({"type": "pong"}))
+            except Exception:
+                pass
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await ws_hub.remove(user_id, ws)
+
+# ============================================================
 # Notifications
 # ============================================================
 @api.get("/notifications")
@@ -830,7 +1009,71 @@ class MockEmailProvider(EmailProvider):
             "sent_at": iso(now_utc()),
         })
 
-email_provider: EmailProvider = MockEmailProvider()
+class ResendEmailProvider(EmailProvider):
+    def __init__(self, api_key: str, sender_email: str, sender_name: str):
+        resend.api_key = api_key
+        self.sender = f"{sender_name} <{sender_email}>" if sender_name else sender_email
+
+    def _to_html(self, body: str) -> str:
+        # Minimal, email-safe HTML wrapper (inline styles, table layout).
+        safe = (body.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                    .replace("\n", "<br>"))
+        return (
+            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+            'style="background:#FAFAFA;padding:32px 0;font-family:Manrope,Arial,sans-serif;">'
+            '<tr><td align="center">'
+            '<table role="presentation" width="560" cellpadding="0" cellspacing="0" '
+            'style="background:#ffffff;border:1px solid #E2E8F0;border-radius:12px;">'
+            '<tr><td style="padding:28px 32px;">'
+            '<div style="font-size:12px;letter-spacing:0.18em;text-transform:uppercase;'
+            'font-weight:700;color:#E06A4E;margin-bottom:12px;">TutorHive</div>'
+            f'<div style="color:#0F172A;font-size:15px;line-height:1.55;">{safe}</div>'
+            '<div style="margin-top:28px;padding-top:16px;border-top:1px solid #E2E8F0;'
+            'color:#64748B;font-size:12px;">You are receiving this because you have an '
+            'upcoming session on TutorHive.</div>'
+            '</td></tr></table></td></tr></table>'
+        )
+
+    async def send(self, to_email, to_name, subject, body, meta):
+        params = {
+            "from": self.sender,
+            "to": [to_email],
+            "subject": subject,
+            "text": body,
+            "html": self._to_html(body),
+        }
+        status = "sent"
+        error = None
+        message_id = None
+        try:
+            resp = await asyncio.to_thread(resend.Emails.send, params)
+            message_id = resp.get("id") if isinstance(resp, dict) else None
+            log.info("[EMAIL:RESEND] to=%s | subject=%s | id=%s", to_email, subject, message_id)
+        except Exception as e:
+            status = "failed"
+            error = str(e)
+            log.exception("[EMAIL:RESEND] failed for %s: %s", to_email, error)
+        await db.email_log.insert_one({
+            "id": str(uuid.uuid4()),
+            "to_email": to_email, "to_name": to_name,
+            "subject": subject, "body": body, "meta": meta,
+            "provider": "resend",
+            "provider_message_id": message_id,
+            "status": status, "error": error,
+            "sent_at": iso(now_utc()),
+        })
+
+def _make_email_provider() -> EmailProvider:
+    api_key = os.environ.get("RESEND_API_KEY", "").strip()
+    if api_key:
+        sender_email = os.environ.get("SENDER_EMAIL", "onboarding@resend.dev")
+        sender_name = os.environ.get("SENDER_NAME", "TutorHive")
+        log.info("Email provider: Resend (from=%s)", sender_email)
+        return ResendEmailProvider(api_key, sender_email, sender_name)
+    log.info("Email provider: MOCK (no RESEND_API_KEY set)")
+    return MockEmailProvider()
+
+email_provider: EmailProvider = _make_email_provider()
 
 def _render_reminder(booking: dict, recipient: dict, other: dict, checkpoint_label: str) -> tuple:
     start = parse_iso(booking["start_time"])
@@ -950,6 +1193,8 @@ async def startup():
     await db.reviews.create_index([("booking_id", ASCENDING)], unique=True)
     await db.notifications.create_index([("user_id", ASCENDING), ("created_at", -1)])
     await db.email_log.create_index([("sent_at", -1)])
+    await db.messages.create_index([("thread_key", ASCENDING), ("created_at", ASCENDING)])
+    await db.messages.create_index([("to_user_id", ASCENDING), ("read", ASCENDING)])
     await seed()
     # Launch background reminder scheduler (no external cron needed)
     asyncio.create_task(reminder_scheduler_loop())
