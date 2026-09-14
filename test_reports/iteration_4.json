@@ -1,0 +1,49 @@
+{
+  "summary": "Iteration 4 — Chat file attachments (GridFS): 20/20 backend pytest cases pass in /app/backend/tests/test_iter4_attachments.py, plus 27/27 prior tests (iter3 + iter2 baseline). Full frontend UI end-to-end verified: paperclip attach button, pending-file chip with remove button, PDF & PNG upload flows, file message bubbles with FileText icon + Download icon, image thumbnails, 10 MB client-side guard toast, and text-only regression all working. WebSocket push of attachment message confirmed. GridFS bucket 'chat_attachments' is properly configured; download endpoint streams byte-identical files with correct Content-Type and Content-Disposition headers.",
+  "features_verified": {
+    "upload_pdf_ok": "PASS — POST /api/messages/attachment with PDF returns message with attachment{id (24-char ObjectId), filename, content_type=application/pdf, size, is_image=false}.",
+    "upload_png_ok": "PASS — is_image=true for image/png.",
+    "reject_bad_mime": "PASS — application/x-msdownload → 400 'File type ... not allowed'.",
+    "reject_oversize": "PASS — 10 MB + 100 bytes → 400 'File too large'.",
+    "reject_empty": "PASS — 0 bytes → 400 'Empty file'.",
+    "stranger_cannot_upload": "PASS — new tutor with no booking → 403.",
+    "download_recipient_byte_identical": "PASS — student GETs tutor's PDF; body identical bytes; Content-Type application/pdf; Content-Disposition=inline.",
+    "download_sender_ok": "PASS — sender can download own file.",
+    "download_image_inline": "PASS — image/png disposition=inline; bytes identical.",
+    "download_third_party_403": "PASS — unrelated new user → 403.",
+    "download_bogus_id_404": "PASS — both well-formed non-existent ObjectId and malformed 'not-an-id' → 404.",
+    "download_admin_can": "PASS — admin can download any attachment.",
+    "thread_includes_attachment": "PASS — GET /api/messages/thread/{other} returns messages with attachment field populated on file msgs, null on text msgs.",
+    "ws_push_attachment": "PASS — student WS receives {type:'message', message:{attachment:{filename:'ws_push.pdf',...}}} within seconds of tutor uploading.",
+    "frontend_ui_flow": "PASS — student opens Messages, clicks message-attach, picks PDF, pending-file chip appears with pending-file-remove button, caption 'Test worksheet caption' typed, message-send clicked, upload runs, chip clears, msg-file-<id> bubble appears with FileText+filename+size+Download icon. href built as `${API}/messages/attachment/<id>`.",
+    "frontend_image_thumbnail": "PASS — image PNG upload rendered as msg-image-<id> anchor with <img> inline (2 image messages visible).",
+    "frontend_oversize_client_guard": "PASS — file 10 MB + 500 bytes → no pending chip; sonner toast 'Max 10 MB per file' shown; file input cleared.",
+    "frontend_text_only_regression": "PASS — text-only send still works; message rendered in scroller.",
+    "prior_regression": "PASS — 27/27 iter2+iter3 backend tests still green (messaging REST, WS hello, attendance, bookings, admin, email log)."
+  },
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter4_attachments.py",
+    "/app/test_reports/pytest/iter4.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is now 1446 lines. Highly recommend splitting into routers (auth, tutors, bookings, admin, messaging, attachments, attendance, email). Not blocking but maintenance-heavy.",
+    "MAX_ATTACHMENT_BYTES check reads the entire file into memory before size validation (`data = await file.read()` then `len(data) > MAX`). For 10 MB this is fine, but consider streaming validation via file.file.tell() or checking Content-Length header first to reject early — avoids buffering 10 MB from malicious clients.",
+    "Attachment auth on download does an extra DB round-trip: db.messages.find_one({'attachment.id': file_id}). Consider adding an index: `db.messages.create_index('attachment.id', sparse=True)` for scale.",
+    "Filename in Content-Disposition is not sanitized/encoded — a filename containing '\"' or non-ASCII could break the header. Use RFC 5987 encoding (`filename*=UTF-8''...`) or werkzeug.utils.secure_filename.",
+    "No virus/mime-sniffing on upload — trusts client-declared Content-Type. A malicious client can upload a .exe with content_type='application/pdf'. Consider python-magic to verify actual bytes vs claimed MIME.",
+    "GridFS orphan cleanup: if `_verify_can_message` throws AFTER `fs.upload_from_stream` completes, the file would already be persisted. Currently _verify runs BEFORE upload (line 859 — good), but if an exception fires between upload and insert_one, we leak the GridFS blob. Wrap in try/except and delete on failure.",
+    "WebSocket broadcast doesn't remove dead sockets on send failure (still an iter3 finding). Not user-visible but leaks memory over time.",
+    "Frontend Messages.jsx now 233 lines with three separate render branches (image / file / text) inside the same JSX — extract a MessageBubble subcomponent for readability."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter4_attachments.py"],
+  "success_rate": {"backend": "100% (20/20 iter4 + 27/27 prior)", "frontend": "100% (all attachment UI flows + regression verified)"},
+  "test_credentials": "student@example.com/Student@12345, tutor@example.com/Tutor@12345, admin@example.com/Admin@12345 — all working.",
+  "seed_data_creation": "Created ~4 stranger accounts (stranger_tutor_*, stranger_student_*) for 403 auth tests, and ~6 attachment messages (PDFs + PNGs) between Demo Student <-> Demo Tutor. Harmless demo history.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter4 backend suite at /app/backend/tests/test_iter4_attachments.py — run with `REACT_APP_BACKEND_URL=<url> python -m pytest backend/tests/test_iter4_attachments.py -o addopts='' -v`. Uses pytest.iter4_pdf_id / iter4_png_id module state to chain upload→download tests, so keep addopts='' (no xdist). GridFS bucket name is 'chat_attachments'. Frontend accept list matches backend ALLOWED_ATTACHMENT_TYPES exactly. WebSocket test uses threading to upload in parallel with async ws.recv() — pattern works reliably.",
+  "rca of the issue": "N/A — feature works end-to-end. Only observation: attachment_type mismatch attacks not prevented (see code review #5)."
+}

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
-import { api, formatError, BACKEND_URL } from "@/lib/api";
+import { api, formatError, BACKEND_URL, API } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
-import { Send, MessageSquare } from "lucide-react";
+import { Send, MessageSquare, Paperclip, FileText, Image as ImageIcon, X, Download } from "lucide-react";
 import { toast } from "sonner";
 
 function fmtTime(iso) {
@@ -20,6 +20,9 @@ export default function Messages() {
   const [active, setActive] = useState(null);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
+  const [pendingFile, setPendingFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef(null);
   const wsRef = useRef(null);
   const scrollerRef = useRef(null);
 
@@ -70,14 +73,40 @@ export default function Messages() {
   }, [user, active, loadThreads]);
 
   const send = async () => {
-    if (!text.trim() || !active) return;
+    if (!active) return;
+    if (pendingFile) {
+      setUploading(true);
+      try {
+        const form = new FormData();
+        form.append("file", pendingFile);
+        const params = new URLSearchParams({ to_user_id: active.other.id, caption: text.trim() });
+        await api.post(`/messages/attachment?${params}`, form);
+        setText(""); setPendingFile(null);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      } catch (e) { toast.error(formatError(e)); }
+      finally { setUploading(false); }
+      return;
+    }
+    if (!text.trim()) return;
     setSending(true);
     try {
       await api.post("/messages", { to_user_id: active.other.id, body: text.trim() });
       setText("");
-      // Optimistic: the WS echo will refresh; no need to manually append
     } catch (e) { toast.error(formatError(e)); }
     finally { setSending(false); }
+  };
+
+  const pickFile = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (f.size > 10 * 1024 * 1024) { toast.error("Max 10 MB per file"); e.target.value = ""; return; }
+    setPendingFile(f);
+  };
+
+  const humanSize = (bytes) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
   };
 
   const initials = (name) => name.split(" ").map((n) => n[0]).slice(0, 2).join("").toUpperCase();
@@ -137,23 +166,62 @@ export default function Messages() {
                   <div className="text-center text-sm text-muted-foreground py-10">No messages yet. Say hi 👋</div>
                 ) : active.messages.map((m) => {
                   const mine = m.from_user_id === user?.id;
+                  const att = m.attachment;
+                  const attUrl = att ? `${API}/messages/attachment/${att.id}` : null;
                   return (
                     <div key={m.id} className={`flex ${mine ? "justify-end" : "justify-start"}`} data-testid={`msg-${m.id}`}>
                       <div className={`max-w-[75%] rounded-2xl px-4 py-2 ${mine ? "bg-primary text-white rounded-br-sm" : "bg-white border border-border rounded-bl-sm"}`}>
-                        <div className="whitespace-pre-wrap break-words text-sm">{m.body}</div>
+                        {att && att.is_image && (
+                          <a href={attUrl} target="_blank" rel="noopener noreferrer" className="block mb-2 -mx-2 -mt-1" data-testid={`msg-image-${m.id}`}>
+                            <img src={attUrl} alt={att.filename} className="rounded-xl max-h-72 object-cover w-full" />
+                          </a>
+                        )}
+                        {att && !att.is_image && (
+                          <a href={attUrl} target="_blank" rel="noopener noreferrer"
+                            className={`flex items-center gap-3 rounded-xl px-3 py-2 mb-1 border ${mine ? "bg-white/10 border-white/20 hover:bg-white/20" : "bg-secondary/70 border-border hover:bg-secondary"} transition`}
+                            data-testid={`msg-file-${m.id}`}>
+                            <FileText size={22} className={mine ? "text-white" : "text-primary"} />
+                            <div className="flex-1 min-w-0">
+                              <div className={`font-semibold text-sm truncate ${mine ? "text-white" : ""}`}>{att.filename}</div>
+                              <div className={`text-[0.7rem] ${mine ? "text-white/70" : "text-muted-foreground"}`}>{humanSize(att.size)} · {att.content_type.split("/")[1]?.toUpperCase()}</div>
+                            </div>
+                            <Download size={15} className={mine ? "text-white/80" : "text-muted-foreground"} />
+                          </a>
+                        )}
+                        {m.body && <div className="whitespace-pre-wrap break-words text-sm">{m.body}</div>}
                         <div className={`text-[0.65rem] mt-1 ${mine ? "text-white/70" : "text-muted-foreground"}`}>{fmtTime(m.created_at)}</div>
                       </div>
                     </div>
                   );
                 })}
               </div>
-              <div className="p-4 border-t border-border flex gap-2">
-                <input className="field flex-1" value={text} onChange={(e) => setText(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), send())}
-                  placeholder={`Message ${active.other.name}…`} data-testid="message-input" />
-                <button className="btn-primary" onClick={send} disabled={sending || !text.trim()} data-testid="message-send">
-                  <Send size={15} /> Send
-                </button>
+              <div className="p-4 border-t border-border">
+                {pendingFile && (
+                  <div className="mb-2 flex items-center gap-2 bg-accent px-3 py-2 rounded-lg text-sm" data-testid="pending-file">
+                    {pendingFile.type.startsWith("image/") ? <ImageIcon size={16} className="text-primary" /> : <FileText size={16} className="text-primary" />}
+                    <div className="flex-1 min-w-0 truncate">{pendingFile.name}</div>
+                    <div className="text-xs text-muted-foreground">{humanSize(pendingFile.size)}</div>
+                    <button onClick={() => { setPendingFile(null); if (fileInputRef.current) fileInputRef.current.value = ""; }} className="btn-ghost p-1" data-testid="pending-file-remove"><X size={14} /></button>
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <input ref={fileInputRef} type="file" hidden onChange={pickFile}
+                    accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,text/plain,text/csv,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    data-testid="message-file-input" />
+                  <button type="button" className="btn-outline !px-3" onClick={() => fileInputRef.current?.click()} title="Attach file (max 10 MB)" data-testid="message-attach">
+                    <Paperclip size={16} />
+                  </button>
+                  <input className="field flex-1" value={text} onChange={(e) => setText(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), send())}
+                    placeholder={pendingFile ? "Add a caption (optional)…" : `Message ${active.other.name}…`}
+                    data-testid="message-input" />
+                  <button className="btn-primary" onClick={send} disabled={sending || uploading || (!text.trim() && !pendingFile)} data-testid="message-send">
+                    {uploading ? "Uploading…" : <><Send size={15} /> Send</>}
+                  </button>
+                </div>
+                <div className="text-[0.65rem] text-muted-foreground mt-2">
+                  Attach worksheets, PDFs, or images so students walk in prepared. Max 10 MB.
+                </div>
               </div>
             </>
           )}

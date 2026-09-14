@@ -13,12 +13,14 @@ import jwt
 import resend
 from datetime import datetime, timezone, timedelta, time as dtime, date as ddate
 from typing import List, Optional, Literal
-from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, Query, WebSocket, WebSocketDisconnect, UploadFile, File
+from fastapi.responses import StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
+from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorGridFSBucket
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
 from pymongo import ASCENDING
 from pymongo.errors import DuplicateKeyError
+from bson import ObjectId
 
 # ------------------------------------------------------------
 # Config
@@ -26,6 +28,7 @@ from pymongo.errors import DuplicateKeyError
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
+fs = AsyncIOMotorGridFSBucket(db, bucket_name="chat_attachments")
 
 JWT_ALGO = "HS256"
 JWT_SECRET = os.environ["JWT_SECRET"]
@@ -732,9 +735,37 @@ async def mark_join(booking_id: str, user: dict = Depends(get_current_user)):
 def _thread_key(a: str, b: str) -> str:
     return "::".join(sorted([a, b]))
 
+# Chat attachment config
+MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024  # 10 MB
+ALLOWED_ATTACHMENT_TYPES = {
+    "image/jpeg", "image/png", "image/gif", "image/webp",
+    "application/pdf",
+    "text/plain", "text/csv",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+}
+
+async def _verify_can_message(sender_id: str, sender_role: str, other_id: str) -> None:
+    """Enforce that sender and recipient share at least one booking (or admin)."""
+    if sender_role in ("admin", "super_admin"):
+        return
+    other = await db.users.find_one({"id": other_id}, {"_id": 0, "id": 1})
+    if not other:
+        raise HTTPException(404, "Recipient not found")
+    has_link = await db.bookings.find_one({
+        "$or": [
+            {"student_id": sender_id, "tutor_id": other_id},
+            {"student_id": other_id, "tutor_id": sender_id},
+        ],
+    })
+    if not has_link:
+        raise HTTPException(403, "You can only message tutors/students you have a booking with.")
+
 class MessageCreate(BaseModel):
     to_user_id: str
-    body: str
+    body: Optional[str] = ""
 
 @api.get("/messages/threads")
 async def list_threads(user: dict = Depends(get_current_user)):
@@ -788,40 +819,114 @@ async def get_thread(other_user_id: str, user: dict = Depends(get_current_user),
 
 @api.post("/messages")
 async def send_message(body: MessageCreate, user: dict = Depends(get_current_user)):
-    if not body.body.strip():
+    if not (body.body or "").strip():
         raise HTTPException(400, "Empty message")
-    if len(body.body) > 4000:
+    if len(body.body or "") > 4000:
         raise HTTPException(400, "Message too long")
-    other = await db.users.find_one({"id": body.to_user_id}, {"_id": 0})
-    if not other:
-        raise HTTPException(404, "Recipient not found")
-    # Enforce that at least one active booking exists between the pair (privacy: strangers can't DM)
-    has_link = await db.bookings.find_one({
-        "$or": [
-            {"student_id": user["id"], "tutor_id": body.to_user_id},
-            {"student_id": body.to_user_id, "tutor_id": user["id"]},
-        ],
-    })
-    if not has_link and user["role"] not in ("admin", "super_admin"):
-        raise HTTPException(403, "You can only message tutors/students you have a booking with.")
+    await _verify_can_message(user["id"], user["role"], body.to_user_id)
     msg = {
         "id": str(uuid.uuid4()),
         "thread_key": _thread_key(user["id"], body.to_user_id),
         "from_user_id": user["id"],
         "to_user_id": body.to_user_id,
         "body": body.body.strip(),
+        "attachment": None,
         "created_at": iso(now_utc()),
         "read": False,
     }
     await db.messages.insert_one(msg)
     msg.pop("_id", None)
-    # Push to any live WebSocket subscribers for recipient
     await ws_hub.broadcast(body.to_user_id, {"type": "message", "message": msg})
-    await ws_hub.broadcast(user["id"], {"type": "message", "message": msg})  # echo to sender's other tabs
-    # Notification for offline recipients
+    await ws_hub.broadcast(user["id"], {"type": "message", "message": msg})
     from_name = f"{user['first_name']} {user['last_name']}"
     await notify(body.to_user_id, "NEW_MESSAGE", f"New message from {from_name}", body.body[:120])
     return msg
+
+@api.post("/messages/attachment")
+async def send_attachment(
+    to_user_id: str = Query(...),
+    caption: str = Query(""),
+    file: UploadFile = File(...),
+    user: dict = Depends(get_current_user),
+):
+    if file.content_type not in ALLOWED_ATTACHMENT_TYPES:
+        raise HTTPException(400, f"File type '{file.content_type}' not allowed")
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "Empty file")
+    if len(data) > MAX_ATTACHMENT_BYTES:
+        raise HTTPException(400, f"File too large (max {MAX_ATTACHMENT_BYTES // (1024 * 1024)} MB)")
+    await _verify_can_message(user["id"], user["role"], to_user_id)
+    # Store to GridFS
+    file_id = await fs.upload_from_stream(
+        file.filename or "attachment",
+        data,
+        metadata={
+            "content_type": file.content_type,
+            "size": len(data),
+            "from_user_id": user["id"],
+            "to_user_id": to_user_id,
+        },
+    )
+    attachment = {
+        "id": str(file_id),
+        "filename": file.filename or "attachment",
+        "content_type": file.content_type,
+        "size": len(data),
+        "is_image": file.content_type.startswith("image/"),
+    }
+    msg = {
+        "id": str(uuid.uuid4()),
+        "thread_key": _thread_key(user["id"], to_user_id),
+        "from_user_id": user["id"],
+        "to_user_id": to_user_id,
+        "body": (caption or "").strip(),
+        "attachment": attachment,
+        "created_at": iso(now_utc()),
+        "read": False,
+    }
+    await db.messages.insert_one(msg)
+    msg.pop("_id", None)
+    await ws_hub.broadcast(to_user_id, {"type": "message", "message": msg})
+    await ws_hub.broadcast(user["id"], {"type": "message", "message": msg})
+    from_name = f"{user['first_name']} {user['last_name']}"
+    await notify(to_user_id, "NEW_ATTACHMENT",
+                 f"{from_name} shared {attachment['filename']}",
+                 (caption or "").strip()[:120] or attachment["filename"])
+    return msg
+
+@api.get("/messages/attachment/{file_id}")
+async def download_attachment(file_id: str, user: dict = Depends(get_current_user)):
+    try:
+        oid = ObjectId(file_id)
+    except Exception:
+        raise HTTPException(404, "Attachment not found")
+    # Find message referencing this attachment for auth check
+    msg = await db.messages.find_one({"attachment.id": file_id}, {"_id": 0})
+    if not msg:
+        raise HTTPException(404, "Attachment not found")
+    if user["role"] not in ("admin", "super_admin") and user["id"] not in (msg["from_user_id"], msg["to_user_id"]):
+        raise HTTPException(403, "Forbidden")
+    try:
+        stream = await fs.open_download_stream(oid)
+    except Exception:
+        raise HTTPException(404, "File missing")
+    meta = stream.metadata or {}
+    filename = stream.filename or msg["attachment"]["filename"]
+    content_type = meta.get("content_type") or msg["attachment"]["content_type"]
+
+    async def _iter():
+        while True:
+            chunk = await stream.readchunk()
+            if not chunk:
+                break
+            yield chunk
+
+    disposition = "inline" if content_type.startswith("image/") or content_type == "application/pdf" else f'attachment; filename="{filename}"'
+    return StreamingResponse(_iter(), media_type=content_type, headers={
+        "Content-Disposition": disposition,
+        "Cache-Control": "private, max-age=3600",
+    })
 
 class _WSHub:
     def __init__(self):

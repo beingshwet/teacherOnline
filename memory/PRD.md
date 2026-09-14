@@ -49,6 +49,7 @@ Build a 1-to-1 online tutoring platform (Phase 1, web-only) that connects studen
 - [x] **Real email delivery via Resend** — `ResendEmailProvider` swaps in whenever `RESEND_API_KEY` is set; falls back to mock otherwise. Every reminder logs to the admin email log with provider, status, message id, and error. HTML template is inline-styled and email-safe. (Jan 2026)
 - [x] **Live messaging (student ↔ tutor)** — REST for history + WebSocket for real-time push. Threads list with unread counts, message-read tracking, cross-tab echo. Enforces booking-relationship auth (strangers can't DM). (Jan 2026)
 - [x] **Attendance tracking** — `student_joined_at` / `tutor_joined_at` auto-set when each party enters the built-in classroom; visible on booking detail. Idempotent, non-participants 403. (Jan 2026)
+- [x] **File sharing in chat** — tutors and students can attach worksheets/PDFs/images (10 MB max, 10 allowed MIME types). Stored in MongoDB GridFS (`chat_attachments` bucket). Recipient-scoped auth on download, inline image thumbnails, real-time WS push. (Jan 2026)
 - Cancellation/refund workflow (with cutoff windows) — deferred until payments
 - Stripe payment integration (playbook-based)
 - Tutor profile picture upload to S3
